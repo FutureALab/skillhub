@@ -4,6 +4,10 @@ name: Release Docker Images
 # `docker save` archives to the GitHub Release. Operators on isolated hosts that
 # cannot reach a container registry can download the archives and `docker load`
 # them directly.
+#
+# Each matrix job uploads its own archive straight to the Release instead of
+# round-tripping multi-hundred-megabyte tarballs through workflow artifacts,
+# which avoids the artifact service's size and transfer limits.
 on:
   release:
     types: [published]
@@ -140,6 +144,20 @@ jobs:
           echo "Packaging matrix:"
           echo "${MATRIX}" | python3 -m json.tool
 
+      - name: Verify the release exists
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.meta.outputs.tag }}
+        run: |
+          set -euo pipefail
+
+          if ! gh release view "${TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            echo "::error::Release '${TAG}' does not exist. Publish the draft release before running this workflow."
+            exit 1
+          fi
+          echo "Release '${TAG}' found."
+
   package:
     name: Package ${{ matrix.name }} (linux/${{ matrix.arch }})
     needs: prepare
@@ -222,26 +240,53 @@ jobs:
           sha256sum "${ASSET}" > "${ASSET}.sha256"
           ls -lh "${ASSET}" "${ASSET}.sha256"
 
-      - name: Upload image archive
-        uses: actions/upload-artifact@v4
-        with:
-          name: skillhub-${{ matrix.name }}-linux-${{ matrix.arch }}
-          path: |
-            skillhub-${{ matrix.name }}-${{ needs.prepare.outputs.version }}-linux-${{ matrix.arch }}.tar.gz
-            skillhub-${{ matrix.name }}-${{ needs.prepare.outputs.version }}-linux-${{ matrix.arch }}.tar.gz.sha256
-          if-no-files-found: error
-          retention-days: 7
+      - name: Upload archive to the GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+          NAME: ${{ matrix.name }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
 
-  publish:
-    name: Publish archives to GitHub Release
+          ASSET="skillhub-${NAME}-${VERSION}-linux-${ARCH}.tar.gz"
+
+          # Upload straight to the Release; retry transient API failures.
+          for attempt in 1 2 3 4 5; do
+            if gh release upload "${TAG}" "${ASSET}" "${ASSET}.sha256" \
+                 --repo "${GITHUB_REPOSITORY}" --clobber; then
+              echo "Uploaded ${ASSET}"
+              exit 0
+            fi
+            echo "Upload attempt ${attempt} failed; retrying in $((attempt * 15))s..."
+            sleep $((attempt * 15))
+          done
+
+          echo "::error::Failed to upload ${ASSET} to release ${TAG}"
+          exit 1
+
+  finalize:
+    name: Publish checksums and usage notes
     needs: [prepare, package]
     runs-on: ubuntu-latest
     steps:
-      - name: Download image archives
-        uses: actions/download-artifact@v4
-        with:
-          path: dist
-          merge-multiple: true
+      - name: Download per-image checksums from the Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          gh release download "${TAG}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --pattern '*.tar.gz.sha256' \
+            --dir dist \
+            --clobber
+          echo "Downloaded checksums:"
+          ls -lh dist
 
       - name: Aggregate checksums and usage notes
         shell: bash
@@ -278,7 +323,7 @@ jobs:
           echo "Release assets:"
           ls -lh
 
-      - name: Upload assets to GitHub Release
+      - name: Upload checksums and usage notes
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -286,9 +331,15 @@ jobs:
         run: |
           set -euo pipefail
 
-          if ! gh release view "${TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
-            echo "::error::Release '${TAG}' does not exist. Publish the draft release before running this workflow."
-            exit 1
-          fi
+          for attempt in 1 2 3 4 5; do
+            if gh release upload "${TAG}" dist/* \
+                 --repo "${GITHUB_REPOSITORY}" --clobber; then
+              echo "Uploaded checksums and usage notes"
+              exit 0
+            fi
+            echo "Upload attempt ${attempt} failed; retrying in $((attempt * 15))s..."
+            sleep $((attempt * 15))
+          done
 
-          gh release upload "${TAG}" dist/* --repo "${GITHUB_REPOSITORY}" --clobber
+          echo "::error::Failed to upload checksums to release ${TAG}"
+          exit 1
