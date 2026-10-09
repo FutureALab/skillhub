@@ -38,7 +38,6 @@ jobs:
     outputs:
       tag: ${{ steps.meta.outputs.tag }}
       version: ${{ steps.meta.outputs.version }}
-      owner: ${{ steps.meta.outputs.owner }}
       matrix: ${{ steps.meta.outputs.matrix }}
     steps:
       - name: Check out repository
@@ -55,7 +54,6 @@ jobs:
           EVENT_TAG: ${{ github.event.release.tag_name }}
           INPUT_TAG: ${{ inputs.tag }}
           REQUESTED_ARCHITECTURES: ${{ inputs.architectures }}
-          REPO_OWNER: ${{ github.repository_owner }}
         run: |
           set -euo pipefail
 
@@ -70,12 +68,8 @@ jobs:
           # Asset names must not contain path separators.
           VERSION="${TAG//\//-}"
 
-          # GHCR repositories must be lowercase.
-          OWNER="$(printf '%s' "${REPO_OWNER}" | tr '[:upper:]' '[:lower:]')"
-
           echo "tag=${TAG}" >> "${GITHUB_OUTPUT}"
           echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
-          echo "owner=${OWNER}" >> "${GITHUB_OUTPUT}"
 
           MATRIX="$(python3 - <<'PY'
           import json
@@ -169,6 +163,27 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: Compute image reference
+        id: image
+        shell: bash
+        env:
+          REPO_OWNER: ${{ github.repository_owner }}
+          IMAGE_NAME: ${{ matrix.image }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          # GHCR/OCI repository names must be lowercase.
+          OWNER="$(printf '%s' "${REPO_OWNER}" | tr '[:upper:]' '[:lower:]')"
+          if [ -z "${OWNER}" ]; then
+            echo "::error::github.repository_owner resolved to an empty value."
+            exit 1
+          fi
+
+          IMAGE="ghcr.io/${OWNER}/${IMAGE_NAME}:${VERSION}"
+          echo "image=${IMAGE}" >> "${GITHUB_OUTPUT}"
+          echo "Resolved image reference: ${IMAGE}"
+
       - name: Build ${{ matrix.name }} image
         uses: docker/build-push-action@v6
         with:
@@ -179,22 +194,20 @@ jobs:
           push: false
           provenance: false
           sbom: false
-          tags: ghcr.io/${{ needs.prepare.outputs.owner }}/${{ matrix.image }}:${{ needs.prepare.outputs.version }}
+          tags: ${{ steps.image.outputs.image }}
           cache-from: type=gha,scope=release-${{ matrix.name }}-${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=release-${{ matrix.name }}-${{ matrix.arch }}
 
       - name: Export image with docker save
         shell: bash
         env:
+          IMAGE: ${{ steps.image.outputs.image }}
           VERSION: ${{ needs.prepare.outputs.version }}
-          OWNER: ${{ needs.prepare.outputs.owner }}
           NAME: ${{ matrix.name }}
-          IMAGE_NAME: ${{ matrix.image }}
           ARCH: ${{ matrix.arch }}
         run: |
           set -euo pipefail
 
-          IMAGE="ghcr.io/${OWNER}/${IMAGE_NAME}:${VERSION}"
           ASSET="skillhub-${NAME}-${VERSION}-linux-${ARCH}.tar.gz"
 
           docker image inspect "${IMAGE}" >/dev/null
