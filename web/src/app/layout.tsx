@@ -231,7 +231,7 @@ export function Layout() {
 
       {/* Footer */}
       {!isAuthEntryRoute ? (
-      <footer className="relative z-10 mt-auto border-t bg-secondary/70" style={{ borderColor: 'hsl(var(--border))' }}>
+      <footer className="relative z-10 mt-auto border-t bg-secondary/70 hidden" style={{ borderColor: 'hsl(var(--border))' }}>
         <div className="mx-auto max-w-6xl px-6 py-12 md:px-12 md:py-16">
           <div className="grid grid-cols-2 gap-8 md:grid-cols-5">
             <div className="col-span-2 md:col-span-1">
