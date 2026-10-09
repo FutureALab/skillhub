@@ -222,6 +222,40 @@ docker compose --env-file .env.release -f compose.release.yml up -d --force-recr
 6. 同时发布多架构 manifest：`server` / `web` 覆盖 `linux/amd64`、`linux/arm64` 与
    `linux/riscv64`，`scanner` 暂保持 `linux/amd64` 与 `linux/arm64`
 
+### 6.1 离线镜像归档（docker save）
+
+发布工作流文件：`.github/workflows/release-docker-images.yml`
+
+`publish-images.yml` 负责把镜像推送到 GHCR；`release-docker-images.yml` 则从发布
+源码构建同样的 `server` / `web` / `scanner` 镜像，通过 `docker save` 导出为
+`.tar.gz` 归档，并作为附件上传到对应的 GitHub Release。适用于无法访问 GHCR 的
+隔离环境或离线交付。
+
+触发条件：
+
+- `release.published`
+- 手动 `workflow_dispatch`，可选 `tag`（默认当前 ref）与 `architectures`
+  （留空表示 `server` / `web` 打包 `amd64,arm64,riscv64`，`scanner` 打包 `amd64,arm64`）
+
+Release 附件：
+
+- `skillhub-<component>-<version>-linux-<arch>.tar.gz`（`docker save` 导出的镜像）
+- 每个归档对应的 `.sha256`
+- `skillhub-images-<version>-SHA256SUMS`（汇总校验和）
+- `skillhub-images-<version>-HOW-TO-LOAD.md`（加载说明）
+
+在目标机器上加载：
+
+```bash
+sha256sum -c skillhub-images-<version>-SHA256SUMS
+docker load -i skillhub-server-<version>-linux-amd64.tar.gz
+docker load -i skillhub-web-<version>-linux-amd64.tar.gz
+docker load -i skillhub-scanner-<version>-linux-amd64.tar.gz
+```
+
+加载后的镜像保留 `ghcr.io/<owner>/skillhub-*` 仓库名，可直接配合
+`compose.release.yml` 使用，无需修改 `SKILLHUB_SERVER_IMAGE` 等变量。
+
 ## 7 配置管理
 
 ### 7.1 请求限流配置

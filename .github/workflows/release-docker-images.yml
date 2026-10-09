@@ -1,0 +1,280 @@
+name: Release Docker Images
+
+# Build the SkillHub service images from the released source and attach
+# `docker save` archives to the GitHub Release. Operators on isolated hosts that
+# cannot reach a container registry can download the archives and `docker load`
+# them directly.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: >-
+          Release tag to attach the archives to (for example v0.2.15).
+          Defaults to the ref this workflow runs on.
+        required: false
+        type: string
+      architectures:
+        description: >-
+          Comma-separated linux architectures to package (for example amd64,arm64).
+          Leave empty to package every supported architecture
+          (server/web: amd64,arm64,riscv64; scanner: amd64,arm64).
+        required: false
+        default: ""
+        type: string
+
+concurrency:
+  group: release-docker-images-${{ github.event.release.tag_name || inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  prepare:
+    name: Prepare release metadata
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+      version: ${{ steps.meta.outputs.version }}
+      matrix: ${{ steps.meta.outputs.matrix }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.tag || github.ref }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Resolve tag and build packaging matrix
+        id: meta
+        shell: bash
+        env:
+          EVENT_TAG: ${{ github.event.release.tag_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+          REQUESTED_ARCHITECTURES: ${{ inputs.architectures }}
+          REPO_OWNER: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+
+          if [ -n "${EVENT_TAG}" ]; then
+            TAG="${EVENT_TAG}"
+          elif [ -n "${INPUT_TAG}" ]; then
+            TAG="${INPUT_TAG}"
+          else
+            TAG="${GITHUB_REF_NAME}"
+          fi
+
+          # Asset names must not contain path separators.
+          VERSION="${TAG//\//-}"
+
+          # GHCR repositories must be lowercase.
+          OWNER="$(printf '%s' "${REPO_OWNER}" | tr '[:upper:]' '[:lower:]')"
+
+          echo "tag=${TAG}" >> "${GITHUB_OUTPUT}"
+          echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
+          echo "owner=${OWNER}" >> "${GITHUB_OUTPUT}"
+
+          MATRIX="$(python3 - <<'PY'
+          import json
+          import os
+
+          components = [
+              {
+                  "name": "server",
+                  "image": "skillhub-server",
+                  "context": "./server",
+                  "dockerfile": "./server/Dockerfile",
+                  "architectures": ["amd64", "arm64", "riscv64"],
+              },
+              {
+                  "name": "web",
+                  "image": "skillhub-web",
+                  "context": "./web",
+                  "dockerfile": "./web/Dockerfile",
+                  "architectures": ["amd64", "arm64", "riscv64"],
+              },
+              {
+                  "name": "scanner",
+                  "image": "skillhub-scanner",
+                  "context": "./scanner",
+                  "dockerfile": "./scanner/Dockerfile",
+                  "architectures": ["amd64", "arm64"],
+              },
+          ]
+
+          requested = [
+              item.strip()
+              for item in os.environ.get("REQUESTED_ARCHITECTURES", "").split(",")
+              if item.strip()
+          ]
+
+          supported = {arch for component in components for arch in component["architectures"]}
+          unknown = sorted(set(requested) - supported)
+          if unknown:
+              raise SystemExit(f"Unsupported architecture(s): {', '.join(unknown)}. Supported: {', '.join(sorted(supported))}")
+
+          entries = []
+          for component in components:
+              for arch in component["architectures"]:
+                  if requested and arch not in requested:
+                      continue
+                  entries.append({
+                      "name": component["name"],
+                      "image": component["image"],
+                      "context": component["context"],
+                      "dockerfile": component["dockerfile"],
+                      "arch": arch,
+                  })
+
+          if not entries:
+              raise SystemExit("No images selected; check the architectures input.")
+
+          print(json.dumps({"include": entries}))
+          PY
+          )"
+
+          {
+            echo "matrix<<EOF"
+            echo "${MATRIX}"
+            echo "EOF"
+          } >> "${GITHUB_OUTPUT}"
+
+          echo "Release tag: ${TAG}"
+          echo "Packaging matrix:"
+          echo "${MATRIX}" | python3 -m json.tool
+
+  package:
+    name: Package ${{ matrix.name }} (linux/${{ matrix.arch }})
+    needs: prepare
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.tag || github.ref }}
+          persist-credentials: false
+
+      - name: Set up QEMU
+        if: matrix.arch != 'amd64'
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: ${{ matrix.arch }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build ${{ matrix.name }} image
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          platforms: linux/${{ matrix.arch }}
+          load: true
+          push: false
+          provenance: false
+          sbom: false
+          tags: ghcr.io/${{ needs.prepare.outputs.owner }}/${{ matrix.image }}:${{ needs.prepare.outputs.version }}
+          cache-from: type=gha,scope=release-${{ matrix.name }}-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=release-${{ matrix.name }}-${{ matrix.arch }}
+
+      - name: Export image with docker save
+        shell: bash
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+          OWNER: ${{ needs.prepare.outputs.owner }}
+          NAME: ${{ matrix.name }}
+          IMAGE_NAME: ${{ matrix.image }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+
+          IMAGE="ghcr.io/${OWNER}/${IMAGE_NAME}:${VERSION}"
+          ASSET="skillhub-${NAME}-${VERSION}-linux-${ARCH}.tar.gz"
+
+          docker image inspect "${IMAGE}" >/dev/null
+
+          # docker save streams the image tar; gzip keeps the release asset small
+          # while `docker load -i <asset>` still accepts the compressed archive.
+          docker save "${IMAGE}" | gzip -9 > "${ASSET}"
+
+          gzip -t "${ASSET}"
+          tar -tzf "${ASSET}" >/dev/null
+
+          sha256sum "${ASSET}" > "${ASSET}.sha256"
+          ls -lh "${ASSET}" "${ASSET}.sha256"
+
+      - name: Upload image archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: skillhub-${{ matrix.name }}-linux-${{ matrix.arch }}
+          path: |
+            skillhub-${{ matrix.name }}-${{ needs.prepare.outputs.version }}-linux-${{ matrix.arch }}.tar.gz
+            skillhub-${{ matrix.name }}-${{ needs.prepare.outputs.version }}-linux-${{ matrix.arch }}.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish archives to GitHub Release
+    needs: [prepare, package]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download image archives
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Aggregate checksums and usage notes
+        shell: bash
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          cd dist
+
+          cat ./*.sha256 > "skillhub-images-${VERSION}-SHA256SUMS"
+
+          cat > "skillhub-images-${VERSION}-HOW-TO-LOAD.md" <<EOF
+          # SkillHub Docker image archives ${VERSION}
+
+          Every \`.tar.gz\` asset is produced with \`docker save\` and can be loaded
+          directly into a Docker daemon:
+
+          \`\`\`bash
+          docker load -i skillhub-server-${VERSION}-linux-amd64.tar.gz
+          docker load -i skillhub-web-${VERSION}-linux-amd64.tar.gz
+          docker load -i skillhub-scanner-${VERSION}-linux-amd64.tar.gz
+          \`\`\`
+
+          Loaded images keep the \`ghcr.io/<owner>/skillhub-*\` repository name so they
+          match the image defaults in \`compose.release.yml\`.
+
+          Verify the archives before loading:
+
+          \`\`\`bash
+          sha256sum -c skillhub-images-${VERSION}-SHA256SUMS
+          \`\`\`
+          EOF
+
+          echo "Release assets:"
+          ls -lh
+
+      - name: Upload assets to GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          set -euo pipefail
+
+          if ! gh release view "${TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            echo "::error::Release '${TAG}' does not exist. Publish the draft release before running this workflow."
+            exit 1
+          fi
+
+          gh release upload "${TAG}" dist/* --repo "${GITHUB_REPOSITORY}" --clobber
