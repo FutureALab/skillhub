@@ -38,6 +38,7 @@ jobs:
     outputs:
       tag: ${{ steps.meta.outputs.tag }}
       version: ${{ steps.meta.outputs.version }}
+      owner: ${{ steps.meta.outputs.owner }}
       matrix: ${{ steps.meta.outputs.matrix }}
     steps:
       - name: Check out repository
