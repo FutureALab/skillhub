@@ -475,7 +475,7 @@ export function LandingPage() {
         <EnterpriseSection />
       </div>
 
-      <section className="relative z-10 w-full border-t border-border/70 bg-background px-6 py-16 text-center md:py-20">
+      <section className="relative z-10 w-full border-t border-border/70 bg-background px-6 py-16 text-center md:py-20 hidden">
         <div className="mx-auto max-w-4xl">
           <h2 className="mb-3 text-2xl font-medium tracking-tight text-foreground md:text-3xl">{t('landing.experience.cta.title')}</h2>
           <p className="mb-8 text-muted-foreground">{t('landing.experience.cta.description')}</p>
