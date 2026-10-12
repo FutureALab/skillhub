@@ -184,7 +184,9 @@ registration id，避免多个 issuer 的 `sub` 值空间混用。
 
 - 接口：`POST /api/v1/auth/session/bootstrap`
 - 用途：前端在同域场景下显式触发一次“读取外部会话并尝试换取 skillhub Session”的流程
-- 默认状态：关闭，开源版不提供任何 `PassiveSessionAuthenticator` 实现
+- 默认状态：关闭，且默认不注册任何 `PassiveSessionAuthenticator` 实现
+- 内置实现：`skillhub.auth.trusted-header.enabled=true` 时注册 `forward-auth` provider，信任
+  forward-auth 网关注入的身份标头（见 `com.iflytek.skillhub.auth.trustedheader`）；其余实现仍由私有版提供
 - 安全边界：默认不做全局自动登录 filter，避免匿名访问时隐式建会话、放大 CSRF 和审计复杂度
 
 扩展接口如下：

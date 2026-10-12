@@ -48,6 +48,21 @@ spec:
                 configMapKeyRef:
                   name: {{ include "skillhub.fullname" . }}-config
                   key: auth-direct-provider
+            - name: SKILLHUB_WEB_AUTH_SESSION_BOOTSTRAP_ENABLED
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "skillhub.fullname" . }}-config
+                  key: auth-session-bootstrap-enabled
+            - name: SKILLHUB_WEB_AUTH_SESSION_BOOTSTRAP_PROVIDER
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "skillhub.fullname" . }}-config
+                  key: auth-session-bootstrap-provider
+            - name: SKILLHUB_WEB_AUTH_SESSION_BOOTSTRAP_AUTO
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "skillhub.fullname" . }}-config
+                  key: auth-session-bootstrap-auto
             - name: SKILLHUB_WEB_BASE_PATH
               valueFrom:
                 configMapKeyRef:

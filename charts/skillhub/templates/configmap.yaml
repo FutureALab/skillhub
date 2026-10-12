@@ -56,6 +56,15 @@ data:
   auth-initial-password-login-enabled: {{ .Values.auth.initialSettings.passwordLoginEnabled | quote }}
   auth-initial-self-registration-enabled: {{ .Values.auth.initialSettings.selfRegistrationEnabled | quote }}
   auth-direct-provider: {{ .Values.auth.direct.provider | quote }}
+  auth-session-bootstrap-enabled: {{ or .Values.auth.sessionBootstrap.enabled .Values.auth.trustedHeader.enabled | quote }}
+  auth-session-bootstrap-provider: {{ .Values.auth.sessionBootstrap.provider | default .Values.auth.trustedHeader.providerCode | quote }}
+  auth-session-bootstrap-auto: {{ .Values.auth.sessionBootstrap.auto | quote }}
+  auth-trusted-header-enabled: {{ .Values.auth.trustedHeader.enabled | quote }}
+  auth-trusted-header-provider-code: {{ .Values.auth.trustedHeader.providerCode | quote }}
+  auth-trusted-header-display-name: {{ .Values.auth.trustedHeader.displayName | quote }}
+  auth-trusted-header-user-header: {{ .Values.auth.trustedHeader.userHeader | quote }}
+  auth-trusted-header-email-header: {{ .Values.auth.trustedHeader.emailHeader | quote }}
+  auth-trusted-header-shared-secret-header: {{ .Values.auth.trustedHeader.sharedSecretHeader | quote }}
 
   # Sub-path deployment (empty keeps a fixed-base image's baked base; set e.g. /portal/)
   web-base-path: {{ .Values.web.basePath | default "" | quote }}

@@ -415,6 +415,24 @@ done
 validate_no_trailing_slash OAUTH2_DINGTALK_AUTHORIZE_URI
 validate_no_trailing_slash OAUTH2_DINGTALK_BASE_URI
 
+# Trusted-header auth needs the session-bootstrap endpoint and the web entry, and both sides
+# must agree on the provider code; otherwise the login page silently offers nothing.
+if [ "${SKILLHUB_AUTH_TRUSTED_HEADER_ENABLED:-false}" = "true" ]; then
+  trusted_header_provider="${SKILLHUB_AUTH_TRUSTED_HEADER_PROVIDER_CODE:-forward-auth}"
+  if [ "${SKILLHUB_AUTH_SESSION_BOOTSTRAP_ENABLED:-false}" != "true" ]; then
+    error "SKILLHUB_AUTH_SESSION_BOOTSTRAP_ENABLED must be true when SKILLHUB_AUTH_TRUSTED_HEADER_ENABLED=true"
+  fi
+  if [ "${SKILLHUB_WEB_AUTH_SESSION_BOOTSTRAP_ENABLED:-false}" != "true" ]; then
+    error "SKILLHUB_WEB_AUTH_SESSION_BOOTSTRAP_ENABLED must be true when SKILLHUB_AUTH_TRUSTED_HEADER_ENABLED=true"
+  fi
+  if [ "${SKILLHUB_WEB_AUTH_SESSION_BOOTSTRAP_PROVIDER:-}" != "$trusted_header_provider" ]; then
+    error "SKILLHUB_WEB_AUTH_SESSION_BOOTSTRAP_PROVIDER must equal SKILLHUB_AUTH_TRUSTED_HEADER_PROVIDER_CODE (${trusted_header_provider})"
+  fi
+  if [ -z "${SKILLHUB_AUTH_TRUSTED_HEADER_SHARED_SECRET:-}" ]; then
+    warn "SKILLHUB_AUTH_TRUSTED_HEADER_SHARED_SECRET is empty; trusted headers rely on network isolation only"
+  fi
+fi
+
 if [ "$errors" -gt 0 ]; then
   echo "Release config validation failed: $errors error(s), $warnings warning(s)." >&2
   exit 1

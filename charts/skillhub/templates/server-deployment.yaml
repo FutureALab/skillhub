@@ -297,6 +297,47 @@ spec:
                 configMapKeyRef:
                   name: {{ include "skillhub.fullname" . }}-config
                   key: auth-direct-enabled
+            - name: SKILLHUB_AUTH_SESSION_BOOTSTRAP_ENABLED
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "skillhub.fullname" . }}-config
+                  key: auth-session-bootstrap-enabled
+            - name: SKILLHUB_AUTH_TRUSTED_HEADER_ENABLED
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "skillhub.fullname" . }}-config
+                  key: auth-trusted-header-enabled
+            - name: SKILLHUB_AUTH_TRUSTED_HEADER_PROVIDER_CODE
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "skillhub.fullname" . }}-config
+                  key: auth-trusted-header-provider-code
+            - name: SKILLHUB_AUTH_TRUSTED_HEADER_DISPLAY_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "skillhub.fullname" . }}-config
+                  key: auth-trusted-header-display-name
+            - name: SKILLHUB_AUTH_TRUSTED_HEADER_USER_HEADER
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "skillhub.fullname" . }}-config
+                  key: auth-trusted-header-user-header
+            - name: SKILLHUB_AUTH_TRUSTED_HEADER_EMAIL_HEADER
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "skillhub.fullname" . }}-config
+                  key: auth-trusted-header-email-header
+            - name: SKILLHUB_AUTH_TRUSTED_HEADER_SHARED_SECRET_HEADER
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "skillhub.fullname" . }}-config
+                  key: auth-trusted-header-shared-secret-header
+            - name: SKILLHUB_AUTH_TRUSTED_HEADER_SHARED_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "skillhub.secretName" . }}
+                  key: auth-trusted-header-shared-secret
+                  optional: true
             - name: SKILLHUB_AUTH_INITIAL_PASSWORD_LOGIN_ENABLED
               valueFrom:
                 configMapKeyRef:

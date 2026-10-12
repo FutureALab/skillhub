@@ -45,6 +45,9 @@ fi
 if grep -Fq 'name: OAUTH2_DINGTALK_REDIRECT_URI' "$TMP_DIR/default.yaml"; then
   fail "default Helm rendering must omit an empty DingTalk redirect URI so Spring can derive baseUrl"
 fi
+grep -A1 -F 'name: SKILLHUB_AUTH_TRUSTED_HEADER_ENABLED' "$TMP_DIR/default.yaml" \
+  | grep -Fq 'key: auth-trusted-header-enabled' \
+  || fail "server deployment must expose the trusted-header switch"
 
 render feishu-redirect "$CHART_DIR" \
   --set-string oauth2.feishu.redirectUri=https://skills.example.com/login/oauth2/code/feishu \
@@ -94,6 +97,25 @@ grep -Fq 'oauth2-dingtalk-client-secret: "dingtalk-test-secret"' "$TMP_DIR/dingt
   || fail "Helm must render the configured DingTalk client secret"
 grep -Fq 'name: OAUTH2_DINGTALK_CLIENT_ID' "$TMP_DIR/dingtalk.yaml" \
   || fail "server deployment must inject the DingTalk client id"
+
+render trusted-header "$CHART_DIR" "${stable_args[@]}" \
+  --set auth.trustedHeader.enabled=true \
+  --set-string secrets.trustedHeaderSharedSecret=gateway-shared-secret \
+  >"$TMP_DIR/trusted-header.yaml"
+grep -Fq 'auth-trusted-header-enabled: "true"' "$TMP_DIR/trusted-header.yaml" \
+  || fail "Helm must render the trusted-header switch"
+grep -Fq 'auth-session-bootstrap-enabled: "true"' "$TMP_DIR/trusted-header.yaml" \
+  || fail "trusted-header must enable the session-bootstrap endpoint"
+grep -Fq 'auth-session-bootstrap-provider: "forward-auth"' "$TMP_DIR/trusted-header.yaml" \
+  || fail "session-bootstrap provider must fall back to the trusted-header provider code"
+grep -Fq 'auth-trusted-header-shared-secret: "gateway-shared-secret"' "$TMP_DIR/trusted-header.yaml" \
+  || fail "Helm must render the configured trusted-header shared secret"
+grep -Fq 'name: SKILLHUB_AUTH_TRUSTED_HEADER_USER_HEADER' "$TMP_DIR/trusted-header.yaml" \
+  || fail "server deployment must inject the trusted-header user header name"
+grep -Fq 'key: auth-trusted-header-user-header' "$TMP_DIR/trusted-header.yaml" \
+  || fail "server deployment must read the trusted-header user header name from the config map"
+grep -Fq 'name: SKILLHUB_WEB_AUTH_SESSION_BOOTSTRAP_ENABLED' "$TMP_DIR/trusted-header.yaml" \
+  || fail "web deployment must surface the session-bootstrap entry"
 
 render private-registry "$CHART_DIR" \
   --set server.dependencyWait.image.registry=registry.example.com \
@@ -304,6 +326,9 @@ assert_rejected server-off --set server.enabled=false
 assert_rejected direct-auth-without-provider \
   --set auth.direct.enabled=true \
   --set-string auth.direct.provider=
+assert_rejected session-bootstrap-without-provider \
+  --set auth.sessionBootstrap.enabled=true \
+  --set-string auth.sessionBootstrap.provider=
 assert_rejected ingress-without-server-service --set ingress.enabled=true --set server.service.enabled=false
 assert_rejected ingress-without-web-service --set ingress.enabled=true --set web.service.enabled=false
 assert_rejected multi-without-rwx --set server.replicaCount=2

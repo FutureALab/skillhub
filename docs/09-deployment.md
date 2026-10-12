@@ -310,6 +310,38 @@ services:
 - 前端开关打开之前，后端仍必须同步打开 `skillhub.auth.session-bootstrap.enabled=true`
 - 前后端任一侧未开启，都不会破坏原有登录方式；只会使该兼容入口不可用或不显示
 
+#### 信任标头接入（forward-auth 网关）
+
+开源版内置了一个信任标头的 `PassiveSessionAuthenticator` 实现（provider code 默认 `forward-auth`），
+用于 oauth2-proxy、Authelia、Authentik、nginx `auth_request` 等已经完成认证并注入身份标头的网关。
+网关认证浏览器后注入标头，登录页调用一次 `POST /api/v1/auth/session/bootstrap` 换取 SkillHub 自身的
+Spring Session，后续请求仍走第一方会话，不依赖每请求信任标头。
+
+后端开关（`compose.release.yml` 与 Helm chart 已透传以下变量）：
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `SKILLHUB_AUTH_TRUSTED_HEADER_ENABLED` | `false` | 是否信任网关注入的身份标头 |
+| `SKILLHUB_AUTH_SESSION_BOOTSTRAP_ENABLED` | `false` | 必须同时为 `true`，否则 bootstrap 接口返回 `403` |
+| `SKILLHUB_AUTH_TRUSTED_HEADER_PROVIDER_CODE` | `forward-auth` | 写入 `identity_binding.provider_code`，启用后不要修改 |
+| `SKILLHUB_AUTH_TRUSTED_HEADER_DISPLAY_NAME` | `Enterprise SSO` | 登录页展示名称 |
+| `SKILLHUB_AUTH_TRUSTED_HEADER_USER_HEADER` | `X-Auth-Request-User` | 稳定外部用户标识，同时作为绑定 subject 与登录名 |
+| `SKILLHUB_AUTH_TRUSTED_HEADER_EMAIL_HEADER` | `X-Forwarded-Email` | 网关已验证的邮箱，可为空 |
+| `SKILLHUB_AUTH_TRUSTED_HEADER_SHARED_SECRET_HEADER` | `X-Skillhub-Proxy-Secret` | 网关回显共享密钥的标头名 |
+| `SKILLHUB_AUTH_TRUSTED_HEADER_SHARED_SECRET` | 空 | 共享密钥；为空时仅依赖网络隔离 |
+
+前端还需要打开 `SKILLHUB_WEB_AUTH_SESSION_BOOTSTRAP_ENABLED=true`，
+并把 `SKILLHUB_WEB_AUTH_SESSION_BOOTSTRAP_PROVIDER` 设为同一个 provider code；
+`SKILLHUB_WEB_AUTH_SESSION_BOOTSTRAP_AUTO=true` 会在登录页加载后自动尝试一次。
+
+安全要求：
+
+- 必须保证只能经由该网关访问 server；`X-Forwarded-*` 与身份标头由网关覆写而不是追加，
+  否则任何人都可以伪造标头直接登录
+- 由于 `server.forward-headers-strategy=framework` 会把 `getRemoteAddr()` 重写为
+  `X-Forwarded-For` 的值，应用内无法可靠校验网关来源网段，因此共享密钥或网络隔离是必需的控制项
+- 首次登录会按 `provider_code + subject` 自动建号，并授予新用户默认角色；不做邮箱合并
+
 开发环境：
 
 - 本地命令与 `docker-compose.yml`

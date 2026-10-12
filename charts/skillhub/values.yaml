@@ -24,6 +24,22 @@ auth:
   initialSettings:
     passwordLoginEnabled: true
     selfRegistrationEnabled: true
+  # 企业 SSO 被动会话入口（POST /api/v1/auth/session/bootstrap）。
+  # trustedHeader.enabled=true 时后端会强制开启，无需重复设置。
+  sessionBootstrap:
+    enabled: false
+    # 留空时回退到 auth.trustedHeader.providerCode
+    provider: ""
+    # 登录页加载后自动尝试一次；确认网关行为可靠后再开启
+    auto: false
+  # 信任上游 forward-auth 网关注入的身份标头（如 oauth2-proxy / Authelia）
+  trustedHeader:
+    enabled: false
+    providerCode: forward-auth
+    displayName: Enterprise SSO
+    userHeader: X-Auth-Request-User
+    emailHeader: X-Forwarded-Email
+    sharedSecretHeader: X-Skillhub-Proxy-Secret
 
 oauth2:
   feishu:
@@ -109,6 +125,8 @@ secrets:
   # JSON array of {provider,email,role}; used only while the database is empty.
   initialRoleGrantsJson: ""
   downloadAnonCookieSecret: ""
+  # 证明请求来自可信 forward-auth 网关的共享密钥；留空则仅依赖网络隔离
+  trustedHeaderSharedSecret: ""
   oauth2GithubClientId: ""
   oauth2GithubClientSecret: ""
   oauth2FeishuClientId: ""

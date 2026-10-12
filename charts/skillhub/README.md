@@ -58,6 +58,18 @@ helm -n skillhub upgrade -i skillhub ./charts/skillhub \
 `auth-initial-role-grants-json`。这些值仅用于数据库首次初始化；之后在后台
 “系统配置”中管理。规则格式及管理入口见 [登录开关与外部账号首次授权](../../docs/923-auth-system-settings.md)。
 
+若上游 forward-auth 网关（oauth2-proxy、Authelia、Authentik 等）已完成认证并注入身份标头，
+可设置 `auth.trustedHeader.enabled=true` 接入：网关注入 `userHeader`（默认
+`X-Auth-Request-User`，作为稳定用户标识）与 `emailHeader`（默认 `X-Forwarded-Email`），
+登录页通过 `POST /api/v1/auth/session/bootstrap` 换取 SkillHub 会话。该开关会自动打开
+`auth.sessionBootstrap`，并把 provider code 默认设为 `forward-auth`（可用
+`auth.sessionBootstrap.provider` 覆盖）。可选：
+`auth.sessionBootstrap.auto=true` 在登录页加载后自动尝试一次；
+`secrets.trustedHeaderSharedSecret` 要求网关回显共享密钥。
+
+> **安全要求：** 打开该开关后，任何能直连 server 并伪造这些标头的人都能以任意用户登录。
+> 必须保证只能经网关访问 server，并由网关覆写（而非追加）相关标头。
+
 > **Ingress values 迁移：** 当前版本只支持结构化的 `ingress.hosts[]` 和
 > `ingress.tls[]`。旧的 `ingress.host`、`ingress.tls.enabled` 与
 > `ingress.tls.secretName` 不再接受，升级前必须改成本文 Ingress 示例中的数组结构。
@@ -115,6 +127,7 @@ helm -n skillhub upgrade -i skillhub ./charts/skillhub \
 | `redis-sentinel-password` | 使用外部 Sentinel 时 | Redis Sentinel 密码 |
 | `bootstrap-admin-password` | 是 | 初始管理员密码 |
 | `skillhub-download-anon-cookie-secret` | 是 | 至少 32 字符的匿名下载 Cookie 签名密钥 |
+| `auth-trusted-header-shared-secret` | 否 | forward-auth 网关共享密钥；留空时仅依赖网络隔离 |
 | `oauth2-github-client-id` | 否 | GitHub OAuth2 Client ID |
 | `oauth2-github-client-secret` | 否 | GitHub OAuth2 Client Secret |
 | `oauth2-dingtalk-client-id` | 否 | DingTalk AppKey |

@@ -21,7 +21,7 @@
     "auth": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["direct", "initialSettings"],
+      "required": ["direct", "initialSettings", "sessionBootstrap", "trustedHeader"],
       "properties": {
         "direct": {
           "type": "object",
@@ -39,6 +39,36 @@
           "properties": {
             "passwordLoginEnabled": { "type": "boolean" },
             "selfRegistrationEnabled": { "type": "boolean" }
+          }
+        },
+        "sessionBootstrap": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["enabled", "provider", "auto"],
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "provider": { "type": "string" },
+            "auto": { "type": "boolean" }
+          }
+        },
+        "trustedHeader": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "enabled",
+            "providerCode",
+            "displayName",
+            "userHeader",
+            "emailHeader",
+            "sharedSecretHeader"
+          ],
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "providerCode": { "type": "string", "minLength": 1 },
+            "displayName": { "type": "string", "minLength": 1 },
+            "userHeader": { "type": "string", "minLength": 1 },
+            "emailHeader": { "type": "string", "minLength": 1 },
+            "sharedSecretHeader": { "type": "string", "minLength": 1 }
           }
         }
       }
@@ -194,6 +224,7 @@
         "bootstrapAdminPassword": { "type": "string" },
         "initialRoleGrantsJson": { "type": "string" },
         "downloadAnonCookieSecret": { "type": "string" },
+        "trustedHeaderSharedSecret": { "type": "string" },
         "oauth2GithubClientId": { "type": "string" },
         "oauth2GithubClientSecret": { "type": "string" },
         "oauth2FeishuClientId": { "type": "string" },

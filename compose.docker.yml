@@ -1,0 +1,289 @@
+# =============================================================================
+# SkillHub 一键全套（Docker）—— compose.docker.yml
+#
+# 依赖与应用全部在这一个文件里，无需 .env：
+#   postgres / redis / minio        —— 基础设施
+#   skill-scanner / server / web    —— SkillHub 自身
+#
+# 用法：
+#   docker compose -f compose.docker.yml up -d --wait
+#   docker compose -f compose.docker.yml ps
+#   docker compose -f compose.docker.yml logs -f server
+#   docker compose -f compose.docker.yml down          # 停止，保留数据
+#   docker compose -f compose.docker.yml down -v       # 停止并清空所有数据
+#
+# 访问入口：
+#   Web UI            http://localhost            (80)
+#   后端 API          http://localhost:8081       (8081 -> 8080)
+#   MinIO 控制台      http://localhost:9001       (minioadmin / minioadmin)
+#   PostgreSQL        localhost:5432              (skillhub / skillhub_demo)
+#   Redis             localhost:6379
+#   登录账号          admin / ChangeMe!2026       （首次启动自动创建）
+#
+# 设计说明：
+#   * 所有取值均已写死字面量，不引用 ${VAR}，因此不会被仓库里现存的
+#     .env / .env.release 干扰，也不需要 --env-file。
+#   * 技能包存 MinIO（bucket：skillhub），预签名下载地址用
+#     http://localhost:9000，所以浏览器要能访问 9000 端口。
+#   * 镜像固定为 v0.2.221（本地已有，无需联网拉取）；升级请改下面三行 image。
+#     注意 ghcr.io/futurealab/skillhub-* 是私有仓库，本地没有对应 tag 时
+#     compose 会尝试 pull 并失败（unauthorized），务必先 docker load / pull 好。
+#   * 项目名未设置，默认取目录名（当前为 skillhub），容器名如 skillhub-server-1。
+#   * 数据卷专用：docker_pg_data / docker_redis_data / docker_minio_data，
+#     首次启动用本文件里的密码初始化一个干净库，换任何机器都能起。
+#     不要改成通用的 postgres_data：那个卷已被 dev 栈（密码 skillhub_dev）或
+#     release 栈（密码 skillhub_change_me_2026）初始化过，密码对不上会启动失败：
+#       FATAL: password authentication failed for user "skillhub"
+#     若要复用现有 dev/release 数据，把下面三处卷名改回
+#     postgres_data / redis_data / minio_release_data，并把
+#     SPRING_DATASOURCE_PASSWORD 改成该卷初始化时的密码。
+#   * 端口冲突（常见于 80 / 8081 / 5432 / 6379 / 9000）时，改对应 ports
+#     左侧的宿主端口即可。
+# =============================================================================
+services:
+
+  # ---------------------------------------------------------------------------
+  # PostgreSQL 16
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5432:5432"
+    environment:
+      POSTGRES_DB: skillhub
+      POSTGRES_USER: skillhub
+      POSTGRES_PASSWORD: skillhub_demo
+    volumes:
+      - docker_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U skillhub -d skillhub"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ---------------------------------------------------------------------------
+  # Redis 7（会话、分布式锁、幂等、扫描任务流）
+  # ---------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:6379:6379"
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - docker_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ---------------------------------------------------------------------------
+  # MinIO（S3 兼容对象存储，存放技能包与文件）
+  # ---------------------------------------------------------------------------
+  minio:
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    restart: unless-stopped
+    ports:
+      - "9000:9000"    # S3 API / 预签名下载
+      - "9001:9001"    # 控制台
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    command: ["server", "/data", "--console-address", ":9001"]
+    volumes:
+      # 专用卷：不要用 minio_data，那个卷被 dev 栈的 pgsty/silo 写过新版配置，
+      # 本版 MinIO 会报 invalid keys 且控制台不监听。
+      - docker_minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+  # ---------------------------------------------------------------------------
+  # 一次性初始化：创建 bucket
+  # 服务端自身只在每次 JVM 首次写入时自动建桶，换了空卷就会 NoSuchBucket，
+  # 这里显式建桶更稳（幂等，已存在则跳过）。
+  # ---------------------------------------------------------------------------
+  minio-init:
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    restart: "no"
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+      SKILLHUB_STORAGE_S3_BUCKET: skillhub
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        mc alias set hub http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD" >/dev/null
+        mc mb --ignore-existing "hub/$$SKILLHUB_STORAGE_S3_BUCKET"
+        echo "bucket $$SKILLHUB_STORAGE_S3_BUCKET ready"
+
+  # ---------------------------------------------------------------------------
+  # 安全扫描器（技能包静态/规则扫描，接内网 LLM 时填 SKILL_SCANNER_LLM_*）
+  # ---------------------------------------------------------------------------
+  skill-scanner:
+    image: ghcr.io/futurealab/skillhub-scanner:v0.2.221
+    restart: unless-stopped
+    platform: linux/amd64
+    environment:
+      SKILL_SCANNER_LLM_API_KEY: ""
+      SKILL_SCANNER_LLM_BASE_URL: ""
+      SKILL_SCANNER_LLM_MODEL: ""
+      SKILLHUB_SCANNER_MAX_CONCURRENT_SCANS: "1"
+      SKILLHUB_SCANNER_HARD_TIMEOUT_SECONDS: "930"
+      SKILLHUB_SCANNER_MAX_UPLOAD_SIZE_BYTES: "110100480"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2).read()"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # ---------------------------------------------------------------------------
+  # 后端 API
+  # ---------------------------------------------------------------------------
+  server:
+    image: ghcr.io/futurealab/skillhub-server:v0.2.221
+    restart: unless-stopped
+    platform: linux/amd64
+    ports:
+      - "8081:8080"
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+
+      # ==================== PostgreSQL ====================
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/skillhub
+      SPRING_DATASOURCE_USERNAME: skillhub
+      SPRING_DATASOURCE_PASSWORD: skillhub_demo
+
+      # ==================== Redis ====================
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PORT: "6379"
+
+      # ==================== MinIO ====================
+      SKILLHUB_STORAGE_PROVIDER: s3
+      SKILLHUB_STORAGE_S3_ENDPOINT: http://minio:9000
+      # 浏览器可达地址：明文 HTTP 访问时下载是 302 跳到该预签名地址
+      SKILLHUB_STORAGE_S3_PUBLIC_ENDPOINT: http://localhost:9000
+      SKILLHUB_STORAGE_S3_BUCKET: skillhub
+      SKILLHUB_STORAGE_S3_ACCESS_KEY: minioadmin
+      SKILLHUB_STORAGE_S3_SECRET_KEY: minioadmin
+      SKILLHUB_STORAGE_S3_REGION: us-east-1
+      SKILLHUB_STORAGE_S3_FORCE_PATH_STYLE: "true"
+      SKILLHUB_STORAGE_S3_DISABLE_CHUNKED_ENCODING: "false"
+      SKILLHUB_STORAGE_S3_AUTO_CREATE_BUCKET: "true"
+      SKILLHUB_STORAGE_S3_PRESIGN_EXPIRY: PT10M
+
+      # ==================== 会话与访问入口 ====================
+      SESSION_COOKIE_SECURE: "false"
+      SKILLHUB_PUBLIC_BASE_URL: http://localhost
+      DEVICE_AUTH_VERIFICATION_URI: /device
+      # 演示用固定密钥；正式环境请换成 openssl rand -hex 32
+      SKILLHUB_DOWNLOAD_ANON_COOKIE_SECRET: skillhub-docker-anon-download-secret-0123456789
+      SKILLHUB_SUITE_BUNDLE_CONFIRMATION_ENABLED: "false"
+      SKILLHUB_SUITE_REVIEW_WRITES_ENABLED: "true"
+
+      # ==================== 安全扫描 ====================
+      SKILLHUB_SECURITY_SCANNER_ENABLED: "true"
+      SKILLHUB_SECURITY_SCANNER_URL: http://skill-scanner:8000
+      SKILLHUB_SECURITY_SCANNER_MODE: upload
+      SKILLHUB_SECURITY_SCANNER_CONNECT_TIMEOUT: "5000"
+      SKILLHUB_SECURITY_SCANNER_READ_TIMEOUT: "900000"
+      SKILLHUB_SECURITY_SCANNER_RETRY_MAX: "3"
+      SKILLHUB_SCAN_STREAM_RECLAIM_MIN_IDLE: PT16M
+
+      # ==================== 初始化与登录 ====================
+      SKILLHUB_BUILTIN_SKILLS_ENABLED: "true"
+      BOOTSTRAP_ADMIN_ENABLED: "true"
+      BOOTSTRAP_ADMIN_USER_ID: docker-admin
+      BOOTSTRAP_ADMIN_USERNAME: admin
+      BOOTSTRAP_ADMIN_PASSWORD: ChangeMe!2026
+      BOOTSTRAP_ADMIN_DISPLAY_NAME: Admin
+      BOOTSTRAP_ADMIN_EMAIL: admin@skillhub.local
+      # 未接真实 OAuth，占位值不会在登录页显示第三方按钮
+      OAUTH2_GITHUB_CLIENT_ID: local-placeholder
+      OAUTH2_GITHUB_CLIENT_SECRET: local-placeholder
+      OAUTH2_GITLAB_CLIENT_ID: local-placeholder
+      OAUTH2_GITLAB_CLIENT_SECRET: local-placeholder
+      OAUTH2_FEISHU_CLIENT_ID: local-placeholder
+      OAUTH2_FEISHU_CLIENT_SECRET: local-placeholder
+      OAUTH2_DINGTALK_CLIENT_ID: local-placeholder
+      OAUTH2_DINGTALK_CLIENT_SECRET: local-placeholder
+      SKILLHUB_AUTH_DIRECT_ENABLED: "false"
+
+      # ==================== 可观测性 ====================
+      SKILLHUB_TRACING_MODE: none
+      SKILLHUB_LOG_FORMAT: json
+      SKILLHUB_LOG_ASYNC_QUEUE_SIZE: "1024"
+      SKILLHUB_SERVICE_VERSION: v0.2.221
+      SKILLHUB_SERVICE_ENVIRONMENT: production
+
+      # ==================== 邮件（密码重置，可选） ====================
+      SPRING_MAIL_HOST: ""
+      SPRING_MAIL_PORT: "25"
+      SPRING_MAIL_USERNAME: ""
+      SPRING_MAIL_PASSWORD: ""
+      SPRING_MAIL_SMTP_AUTH: "false"
+      SPRING_MAIL_SMTP_STARTTLS_ENABLE: "false"
+      SPRING_MAIL_PROPERTIES_MAIL_SMTP_SSL_ENABLE: "false"
+      SPRING_MAIL_PROPERTIES_MAIL_SMTP_SSL_TRUST: ""
+      SKILLHUB_AUTH_PASSWORD_RESET_CODE_EXPIRY: PT10M
+      SKILLHUB_AUTH_PASSWORD_RESET_FROM_ADDRESS: noreply@skillhub.local
+      SKILLHUB_AUTH_PASSWORD_RESET_FROM_NAME: SkillHub
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      skill-scanner:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+
+  # ---------------------------------------------------------------------------
+  # 前端（nginx 托管静态资源并反代 /api 到 server）
+  # ---------------------------------------------------------------------------
+  web:
+    image: ghcr.io/futurealab/skillhub-web:v0.2.221
+    restart: unless-stopped
+    platform: linux/amd64
+    ports:
+      - "80:80"
+    environment:
+      SKILLHUB_API_UPSTREAM: http://server:8080
+      SKILLHUB_TRUST_FORWARDED_PROTO: "false"
+      # 留空表示同源访问，前端请求走 nginx 反代
+      SKILLHUB_WEB_API_BASE_URL: ""
+      SKILLHUB_WEB_BASE_PATH: ""
+      SKILLHUB_PUBLIC_BASE_URL: http://localhost
+      SKILLHUB_WEB_AUTH_DIRECT_ENABLED: "false"
+      SKILLHUB_WEB_AUTH_DIRECT_PROVIDER: ""
+    depends_on:
+      server:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/nginx-health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+volumes:
+  docker_pg_data:
+  docker_redis_data:
+  docker_minio_data:

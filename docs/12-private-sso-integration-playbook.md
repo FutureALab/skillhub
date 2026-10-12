@@ -58,6 +58,14 @@
 - [PassiveSessionAuthenticator.java](/Users/xudongsun/github/skillhub/server/skillhub-auth/src/main/java/com/iflytek/skillhub/auth/bootstrap/PassiveSessionAuthenticator.java)
 - [PlatformSessionService.java](/Users/xudongsun/github/skillhub/server/skillhub-auth/src/main/java/com/iflytek/skillhub/auth/session/PlatformSessionService.java)
 
+另外，开源版已内置一个基于信任标头的 `PassiveSessionAuthenticator` 实现（provider code 默认
+`forward-auth`，位于 `com.iflytek.skillhub.auth.trustedheader`）：当企业网关以 forward-auth 方式
+注入 `X-Auth-Request-User`（稳定用户标识）与 `X-Forwarded-Email`（已验证邮箱）时，无需私有实现，
+同时打开 `skillhub.auth.trusted-header.enabled=true` 与 `skillhub.auth.session-bootstrap.enabled=true`
+即可接入。标头名、provider code、展示名和网关共享密钥都可通过 `skillhub.auth.trusted-header.*` 配置，
+具体变量见 `docs/09-deployment.md`。若私有 SSO 不是标头模型（例如需要调用内部校验接口），仍按本文档
+实现 `DirectAuthProvider` / `PassiveSessionAuthenticator`。
+
 ### 3.2 后端公共协议
 
 当前开源版已经提供以下兼容协议：
