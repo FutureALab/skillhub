@@ -23,6 +23,37 @@ export interface AuthMethod {
   actionUrl: string
 }
 
+export interface LocalAuthCapabilities {
+  passwordLoginEnabled: boolean
+  selfRegistrationEnabled: boolean
+  registrationAvailable: boolean
+}
+
+export interface SystemAuthSettings {
+  passwordLoginEnabled: boolean
+  selfRegistrationEnabled: boolean
+  version: number
+  updatedAt: string
+}
+
+export interface ExternalRoleGrantRule {
+  id: number
+  providerCode: string
+  email: string
+  roleCode: string
+  status: 'ACTIVE' | 'DISABLED' | 'CONSUMED'
+  matchedSubject?: string | null
+  grantedUserId?: string | null
+  grantedAt?: string | null
+  version: number
+  updatedAt: string
+}
+
+export interface PlatformRole {
+  code: string
+  name: string
+}
+
 export type ApiToken = Omit<components['schemas']['TokenSummaryResponse'], 'id' | 'name' | 'tokenPrefix' | 'createdAt'> & {
   id: number
   name: string
@@ -328,6 +359,30 @@ export interface SubmitPromotionRequest {
   targetNamespaceId: number
 }
 
+export interface PromotionSourceState {
+  requestKind: 'INITIAL' | 'UPDATE' | 'PENDING'
+  targetSkillId: number | null
+  targetCurrentVersion: string | null
+  pendingPromotionId: number | null
+}
+
+export interface PromotionRevocation {
+  id: number
+  initialPromotionRequestId: number
+  sourceSkillId: number
+  targetSkillId: number
+  sourceNamespaceId: number
+  targetNamespaceId: number
+  skillSlug: string
+  status: PromotionStatus
+  reason: string | null
+  submittedBy: string
+  reviewedBy: string | null
+  reviewComment: string | null
+  submittedAt: string
+  reviewedAt: string | null
+}
+
 export interface SkillVersion {
   id: number
   version: string
@@ -587,6 +642,9 @@ export type PromotionSortBy = 'reviewedAt'
 
 export interface PromotionTask {
   id: number
+  requestKind?: 'INITIAL' | 'UPDATE'
+  targetCurrentVersion?: string | null
+  targetVersionId?: number | null
   sourceSkillId: number
   sourceSkillDisplayName: string
   sourceSkillSummary?: string | null

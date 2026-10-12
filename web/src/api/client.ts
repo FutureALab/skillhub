@@ -22,6 +22,8 @@ import type {
   PromotionSortDirection,
   PromotionStatus,
   PromotionTask,
+  PromotionSourceState,
+  PromotionRevocation,
   AuditLogItem,
   SkillSummary,
   SkillReport,
@@ -32,6 +34,10 @@ import type {
   PagedResponse,
   ReportDisposition,
   AuthMethod,
+  LocalAuthCapabilities,
+  SystemAuthSettings,
+  ExternalRoleGrantRule,
+  PlatformRole,
   OAuthProvider,
   User,
   ManagedNamespace,
@@ -335,6 +341,10 @@ export async function getCurrentUser(): Promise<User | null> {
 export const authApi = {
   getMe: getCurrentUser,
 
+  getLocalCapabilities(): Promise<LocalAuthCapabilities> {
+    return fetchJson<LocalAuthCapabilities>('/api/v1/auth/local/capabilities')
+  },
+
   async getProviders(returnTo?: string): Promise<OAuthProvider[]> {
     const params = returnTo ? `?returnTo=${encodeURIComponent(returnTo)}` : ''
     const providers = await fetchJson<OAuthProvider[]>(`/api/v1/auth/providers${params}`)
@@ -444,6 +454,51 @@ export const authApi = {
         username: request.username,
         password: request.password,
       }),
+    })
+  },
+}
+
+export const systemConfigApi = {
+  getLocalAuth(): Promise<SystemAuthSettings> {
+    return fetchJson<SystemAuthSettings>('/api/v1/admin/system-config/auth/local')
+  },
+
+  updateLocalAuth(request: Pick<SystemAuthSettings, 'passwordLoginEnabled' | 'selfRegistrationEnabled' | 'version'>): Promise<SystemAuthSettings> {
+    return fetchJson<SystemAuthSettings>('/api/v1/admin/system-config/auth/local', {
+      method: 'PUT',
+      headers: getCsrfHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify(request),
+    })
+  },
+
+  listRoles(): Promise<PlatformRole[]> {
+    return fetchJson<PlatformRole[]>('/api/v1/admin/system-config/roles')
+  },
+
+  listRoleGrants(): Promise<ExternalRoleGrantRule[]> {
+    return fetchJson<ExternalRoleGrantRule[]>('/api/v1/admin/system-config/role-grants')
+  },
+
+  createRoleGrant(request: { providerCode: string; email: string; roleCode: string }): Promise<ExternalRoleGrantRule> {
+    return fetchJson<ExternalRoleGrantRule>('/api/v1/admin/system-config/role-grants', {
+      method: 'POST',
+      headers: getCsrfHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify(request),
+    })
+  },
+
+  updateRoleGrant(id: number, request: { roleCode: string; version: number }): Promise<ExternalRoleGrantRule> {
+    return fetchJson<ExternalRoleGrantRule>(`/api/v1/admin/system-config/role-grants/${id}`, {
+      method: 'PUT',
+      headers: getCsrfHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify(request),
+    })
+  },
+
+  disableRoleGrant(id: number, version: number): Promise<ExternalRoleGrantRule> {
+    return fetchJson<ExternalRoleGrantRule>(`/api/v1/admin/system-config/role-grants/${id}?version=${version}`, {
+      method: 'DELETE',
+      headers: getCsrfHeaders(),
     })
   },
 }
@@ -1049,6 +1104,10 @@ export const reviewApi = {
 }
 
 export const promotionApi = {
+  async getSourceState(sourceSkillId: number): Promise<PromotionSourceState> {
+    return fetchJson<PromotionSourceState>(`${WEB_API_PREFIX}/promotions/source/${sourceSkillId}/state`)
+  },
+
   async submit(request: { sourceSkillId: number; sourceVersionId: number; targetNamespaceId: number }): Promise<void> {
     await fetchJson<void>(`${WEB_API_PREFIX}/promotions`, {
       method: 'POST',
@@ -1097,6 +1156,46 @@ export const promotionApi = {
       }),
       body: JSON.stringify({ comment }),
     })
+  },
+}
+
+export const promotionRevocationApi = {
+  submit(sourceSkillId: number, reason: string): Promise<PromotionRevocation> {
+    return fetchJson<PromotionRevocation>(`${WEB_API_PREFIX}/promotion-revocations`, {
+      method: 'POST',
+      headers: getCsrfHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ sourceSkillId, reason }),
+    })
+  },
+  direct(sourceSkillId: number, reason: string): Promise<PromotionRevocation> {
+    return fetchJson<PromotionRevocation>(`${WEB_API_PREFIX}/promotion-revocations/source/${sourceSkillId}/direct`, {
+      method: 'POST',
+      headers: getCsrfHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ sourceSkillId, reason }),
+    })
+  },
+  approve(id: number, comment: string): Promise<PromotionRevocation> {
+    return fetchJson<PromotionRevocation>(`${WEB_API_PREFIX}/promotion-revocations/${id}/approve`, {
+      method: 'POST',
+      headers: getCsrfHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ comment }),
+    })
+  },
+  reject(id: number, comment: string): Promise<PromotionRevocation> {
+    return fetchJson<PromotionRevocation>(`${WEB_API_PREFIX}/promotion-revocations/${id}/reject`, {
+      method: 'POST',
+      headers: getCsrfHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ comment }),
+    })
+  },
+  pending(): Promise<PromotionRevocation[]> {
+    return fetchJson<PromotionRevocation[]>(`${WEB_API_PREFIX}/promotion-revocations/pending`)
+  },
+  history(sourceSkillId: number): Promise<PromotionRevocation[]> {
+    return fetchJson<PromotionRevocation[]>(`${WEB_API_PREFIX}/promotion-revocations/source/${sourceSkillId}/history`)
+  },
+  adminHistory(page: number, size: number): Promise<PagedResponse<PromotionRevocation>> {
+    return fetchJson<PagedResponse<PromotionRevocation>>(`${WEB_API_PREFIX}/promotion-revocations/history?page=${page}&size=${size}`)
   },
 }
 
