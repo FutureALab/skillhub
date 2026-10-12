@@ -1,0 +1,68 @@
+# Bundled MinIO (S3-compatible) object store for the release stack.
+#
+# Overlay on top of compose.release.yml — it does NOT contain its own
+# postgres/redis/scanner/server/web definitions, it only adds the object store
+# and points the backend at it.
+#
+# Usage:
+#   docker compose --env-file .env.release \
+#     -f compose.release.yml -f compose.minio.yml up -d --wait
+#
+# Storage wiring lives in .env.release (SKILLHUB_STORAGE_PROVIDER=s3 and the
+# SKILLHUB_STORAGE_S3_* block); the `${...:-default}` fallbacks below keep the
+# overlay usable even if those keys are missing.
+#
+# Console: http://localhost:9001  (MINIO_ROOT_USER / MINIO_ROOT_PASSWORD)
+services:
+  minio:
+    image: ${MINIO_IMAGE:-minio/minio:RELEASE.2025-04-22T22-12-26Z}
+    restart: unless-stopped
+    ports:
+      - "${MINIO_API_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    environment:
+      # Same credentials the backend uses, so a single env block configures both.
+      MINIO_ROOT_USER: ${SKILLHUB_STORAGE_S3_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${SKILLHUB_STORAGE_S3_SECRET_KEY:-minioadmin}
+    command: ["server", "/data", "--console-address", ":9001"]
+    volumes:
+      # Dedicated volume: the dev stack owns `<project>_minio_data`, and its
+      # pgsty/silo build writes a config that this MinIO release rejects.
+      - minio_release_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+  # One-shot bucket bootstrap. The backend only auto-creates the bucket on its
+  # first write per JVM, so a wiped MinIO volume would otherwise fail uploads
+  # with NoSuchBucket until the server restarts.
+  minio-init:
+    image: ${MINIO_IMAGE:-minio/minio:RELEASE.2025-04-22T22-12-26Z}
+    restart: "no"
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: ${SKILLHUB_STORAGE_S3_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${SKILLHUB_STORAGE_S3_SECRET_KEY:-minioadmin}
+      SKILLHUB_STORAGE_S3_BUCKET: ${SKILLHUB_STORAGE_S3_BUCKET:-skillhub}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        mc alias set hub http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD" >/dev/null
+        mc mb --ignore-existing "hub/$$SKILLHUB_STORAGE_S3_BUCKET"
+        echo "bucket $$SKILLHUB_STORAGE_S3_BUCKET ready"
+
+  server:
+    depends_on:
+      minio:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+
+volumes:
+  minio_release_data:

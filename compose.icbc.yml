@@ -1,0 +1,233 @@
+# =============================================================================
+# SkillHub 离线（内网）部署编排 —— ICBC
+#
+# 只含三个应用容器：skill-scanner / server / web。
+# PostgreSQL、Redis、MinIO 都是外部独立服务器上的现成服务，本文件不创建、
+# 不管理、也不暴露它们的端口。
+#
+# 本文件不依赖 .env、不引用任何 ${VAR}，所有取值均已写死，改配置直接改本文件。
+#
+# -----------------------------------------------------------------------------
+# 使用步骤
+# -----------------------------------------------------------------------------
+# 1) 在离线机导入镜像（三个 tar 包，导入后保留 ghcr.io 原仓库名）
+#      docker load -i skillhub-server-v0.2.211.tar
+#      docker load -i skillhub-web-v0.2.211.tar
+#      docker load -i skillhub-scanner-v0.2.211.tar
+#
+# 2) 替换全部占位符（一条命令列出所有待改项）
+#      grep -n 'your-' compose.icbc.yml
+#      your-postgres-host      外部 PostgreSQL 地址
+#      your-strong-password    外部 PostgreSQL 密码
+#      your-redis-host         外部 Redis 地址
+#      your-redis-password     外部 Redis 密码（无密码保持空串 ""）
+#      your-minio-host         外部 MinIO 地址
+#      your-minio-access-key   外部 MinIO Access Key
+#      your-minio-secret-key   外部 MinIO Secret Key
+#      your-domain-or-ip       浏览器访问地址（Web 入口，如 http://10.1.2.3）
+#      your-random-secret-here 匿名下载 cookie 签名密钥，≥32 字符
+#                              openssl rand -hex 32
+#      your-admin-password     首次登录的 admin 密码（登录后请立即修改）
+#
+# 3) 启动 / 查看 / 停止
+#      docker compose -f compose.icbc.yml up -d
+#      docker compose -f compose.icbc.yml ps
+#      docker compose -f compose.icbc.yml logs -f server
+#      docker compose -f compose.icbc.yml down
+#
+# -----------------------------------------------------------------------------
+# 启动前置检查
+# -----------------------------------------------------------------------------
+# * PostgreSQL：已建库 skillhub（默认），账号需有建表权限——首次启动 Flyway 自动建表。
+# * Redis：可连通即可；若开了密码 / ACL 用户 / TLS，改对应三行。
+# * MinIO：bucket（默认 skillhub）需已存在且账号有读写权限。
+#          若给了建桶权限，可把 AUTO_CREATE_BUCKET 改为 "true" 让服务端自动创建。
+# * 浏览器必须能直接访问 SKILLHUB_STORAGE_S3_PUBLIC_ENDPOINT（详见 server 段注释），
+#   否则客户端下载技能时会 302 到一个打不开的地址。
+#
+# -----------------------------------------------------------------------------
+# 端口与容器名
+# -----------------------------------------------------------------------------
+# Web 入口 http://<离线服务器IP>:80    API http://<离线服务器IP>:8081
+# 项目名固定为 skillhub-icbc（容器 skillhub-icbc-server-1 等），避免与本地
+# dev/release 那套同名容器互相覆盖。若同一台机器已跑着别的 SkillHub 容器，
+# 请先停掉再起，否则 80 / 8081 端口冲突。
+# =============================================================================
+name: skillhub-icbc
+
+services:
+
+  # ---------------------------------------------------------------------------
+  # 安全扫描器：技能包上传后的静态/规则扫描，无状态，不对外暴露端口
+  # ---------------------------------------------------------------------------
+  skill-scanner:
+    image: ghcr.io/futurealab/skillhub-scanner:v0.2.211
+    restart: unless-stopped
+    platform: linux/amd64
+    environment:
+      # 内网有 LLM 网关时填这三项启用 AI 扫描；留空则只跑规则扫描
+      SKILL_SCANNER_LLM_API_KEY: ""
+      SKILL_SCANNER_LLM_BASE_URL: ""
+      SKILL_SCANNER_LLM_MODEL: ""
+      SKILLHUB_SCANNER_MAX_CONCURRENT_SCANS: "1"
+      SKILLHUB_SCANNER_HARD_TIMEOUT_SECONDS: "930"
+      SKILLHUB_SCANNER_MAX_UPLOAD_SIZE_BYTES: "110100480"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2).read()"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # ---------------------------------------------------------------------------
+  # 后端：连接外部 PostgreSQL / Redis / MinIO
+  # ---------------------------------------------------------------------------
+  server:
+    image: ghcr.io/futurealab/skillhub-server:v0.2.211
+    restart: unless-stopped
+    platform: linux/amd64
+    ports:
+      - "8081:8080"
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+
+      # ==================== 外部 PostgreSQL ====================
+      SPRING_DATASOURCE_URL: jdbc:postgresql://your-postgres-host:5432/skillhub
+      SPRING_DATASOURCE_USERNAME: skillhub
+      SPRING_DATASOURCE_PASSWORD: your-strong-password
+
+      # ==================== 外部 Redis（单机） ====================
+      SPRING_DATA_REDIS_HOST: your-redis-host
+      SPRING_DATA_REDIS_PORT: "6379"
+      SPRING_DATA_REDIS_PASSWORD: your-redis-password
+      SPRING_DATA_REDIS_USERNAME: ""
+      SPRING_DATA_REDIS_DATABASE: ""
+      SPRING_DATA_REDIS_SSL_ENABLED: "false"
+      SPRING_DATA_REDIS_CONNECT_TIMEOUT: 5s
+      SPRING_DATA_REDIS_TIMEOUT: 3s
+      SPRING_DATA_REDIS_CLIENT_NAME: skillhub
+      # Redis Cluster 部署时改用下面两行（与上面的单机三行二选一）
+      # SPRING_DATA_REDIS_CLUSTER_NODES: redis-0.icbc.local:6379,redis-1.icbc.local:6379,redis-2.icbc.local:6379
+      # SPRING_DATA_REDIS_CLUSTER_MAX_REDIRECTS: "5"
+      # Redis Sentinel 部署（优先级高于 Cluster）
+      # SPRING_DATA_REDIS_SENTINEL_MASTER: mymaster
+      # SPRING_DATA_REDIS_SENTINEL_NODES: sentinel-0.icbc.local:26379,sentinel-1.icbc.local:26379,sentinel-2.icbc.local:26379
+      # SPRING_DATA_REDIS_SENTINEL_USERNAME: ""
+      # SPRING_DATA_REDIS_SENTINEL_PASSWORD: ""
+
+      # ==================== 外部 MinIO ====================
+      SKILLHUB_STORAGE_PROVIDER: s3
+      # 服务端（容器内）访问地址
+      SKILLHUB_STORAGE_S3_ENDPOINT: http://your-minio-host:9000
+      # 客户端（浏览器）访问地址，必须是浏览器能打开的地址，用于签发预签名下载 URL。
+      # 明文 HTTP 访问 SkillHub 时下载是 302 跳转到该地址，所以 MinIO 要对该网段放开；
+      # 若 MinIO 完全不能对客户端暴露，则请用 HTTPS 反代访问 SkillHub（此时后端改为
+      # 自己流式转发，不再 302），并把这里保持成服务端可达的地址。
+      SKILLHUB_STORAGE_S3_PUBLIC_ENDPOINT: http://your-minio-host:9000
+      SKILLHUB_STORAGE_S3_BUCKET: skillhub
+      SKILLHUB_STORAGE_S3_ACCESS_KEY: your-minio-access-key
+      SKILLHUB_STORAGE_S3_SECRET_KEY: your-minio-secret-key
+      SKILLHUB_STORAGE_S3_REGION: us-east-1
+      SKILLHUB_STORAGE_S3_FORCE_PATH_STYLE: "true"
+      SKILLHUB_STORAGE_S3_DISABLE_CHUNKED_ENCODING: "true"
+      # bucket 已手工创建则保持 false；账号有建桶权限时可改 true
+      SKILLHUB_STORAGE_S3_AUTO_CREATE_BUCKET: "false"
+      SKILLHUB_STORAGE_S3_PRESIGN_EXPIRY: PT10M
+
+      # ==================== 会话与访问入口 ====================
+      # 明文 HTTP 访问保持 false；若前面加了 HTTPS 反代则改 true
+      SESSION_COOKIE_SECURE: "false"
+      SKILLHUB_PUBLIC_BASE_URL: http://your-domain-or-ip
+      DEVICE_AUTH_VERIFICATION_URI: /device
+      # 匿名下载限流 cookie 签名密钥，至少 32 字符：openssl rand -hex 32
+      SKILLHUB_DOWNLOAD_ANON_COOKIE_SECRET: your-random-secret-here
+      SKILLHUB_SUITE_BUNDLE_CONFIRMATION_ENABLED: "false"
+      SKILLHUB_SUITE_REVIEW_WRITES_ENABLED: "true"
+
+      # ==================== 安全扫描 ====================
+      SKILLHUB_SECURITY_SCANNER_ENABLED: "true"
+      SKILLHUB_SECURITY_SCANNER_URL: http://skill-scanner:8000
+      SKILLHUB_SECURITY_SCANNER_MODE: upload
+      SKILLHUB_SECURITY_SCANNER_CONNECT_TIMEOUT: "5000"
+      SKILLHUB_SECURITY_SCANNER_READ_TIMEOUT: "900000"
+      SKILLHUB_SECURITY_SCANNER_RETRY_MAX: "3"
+      SKILLHUB_SCAN_STREAM_RECLAIM_MIN_IDLE: PT16M
+
+      # ==================== 初始化开关 ====================
+      # 内置 starter skills 的 zip 需从公网 https 地址下载，内网拉不到，故关闭。
+      # 技能请在后台页面 / CLI 自行发布。若自建了内网 https 镜像源可改 true。
+      SKILLHUB_BUILTIN_SKILLS_ENABLED: "false"
+      BOOTSTRAP_ADMIN_ENABLED: "true"
+      BOOTSTRAP_ADMIN_USER_ID: icbc-admin
+      BOOTSTRAP_ADMIN_USERNAME: admin
+      BOOTSTRAP_ADMIN_PASSWORD: your-admin-password
+      BOOTSTRAP_ADMIN_DISPLAY_NAME: Admin
+      BOOTSTRAP_ADMIN_EMAIL: admin@skillhub.local
+      # 内网无外网，第三方登录保持 local-placeholder（占位值不会在登录页显示按钮）
+      OAUTH2_GITHUB_CLIENT_ID: local-placeholder
+      OAUTH2_GITHUB_CLIENT_SECRET: local-placeholder
+      OAUTH2_GITLAB_CLIENT_ID: local-placeholder
+      OAUTH2_GITLAB_CLIENT_SECRET: local-placeholder
+      OAUTH2_FEISHU_CLIENT_ID: local-placeholder
+      OAUTH2_FEISHU_CLIENT_SECRET: local-placeholder
+      OAUTH2_DINGTALK_CLIENT_ID: local-placeholder
+      OAUTH2_DINGTALK_CLIENT_SECRET: local-placeholder
+      # 企业 SSO（OIDC）接入：按注册 id 添加 SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_<ID>_*
+      # 与 SPRING_SECURITY_OAUTH2_CLIENT_PROVIDER_<ID>_ISSUER_URI，详见 docs/11-auth-extensibility-and-private-sso.md
+      SKILLHUB_AUTH_DIRECT_ENABLED: "false"
+
+      # ==================== 可观测性 ====================
+      SKILLHUB_TRACING_MODE: none
+      SKILLHUB_LOG_FORMAT: json
+      SKILLHUB_LOG_ASYNC_QUEUE_SIZE: "1024"
+      SKILLHUB_SERVICE_VERSION: v0.2.211
+      SKILLHUB_SERVICE_ENVIRONMENT: production
+
+      # ==================== 邮件（密码重置，可选） ====================
+      SPRING_MAIL_HOST: ""
+      SPRING_MAIL_PORT: "25"
+      SPRING_MAIL_USERNAME: ""
+      SPRING_MAIL_PASSWORD: ""
+      SPRING_MAIL_SMTP_AUTH: "false"
+      SPRING_MAIL_SMTP_STARTTLS_ENABLE: "false"
+      SPRING_MAIL_PROPERTIES_MAIL_SMTP_SSL_ENABLE: "false"
+      SPRING_MAIL_PROPERTIES_MAIL_SMTP_SSL_TRUST: ""
+      SKILLHUB_AUTH_PASSWORD_RESET_CODE_EXPIRY: PT10M
+      SKILLHUB_AUTH_PASSWORD_RESET_FROM_ADDRESS: noreply@skillhub.local
+      SKILLHUB_AUTH_PASSWORD_RESET_FROM_NAME: SkillHub
+    depends_on:
+      skill-scanner:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+
+  # ---------------------------------------------------------------------------
+  # 前端：nginx 托管静态资源并反代 /api 到 server
+  # ---------------------------------------------------------------------------
+  web:
+    image: ghcr.io/futurealab/skillhub-web:v0.2.211
+    restart: unless-stopped
+    platform: linux/amd64
+    ports:
+      - "80:80"
+    environment:
+      SKILLHUB_API_UPSTREAM: http://server:8080
+      SKILLHUB_TRUST_FORWARDED_PROTO: "false"
+      # 留空表示同源访问，前端走 nginx 反代
+      SKILLHUB_WEB_API_BASE_URL: ""
+      SKILLHUB_WEB_BASE_PATH: ""
+      SKILLHUB_PUBLIC_BASE_URL: http://your-domain-or-ip
+      SKILLHUB_WEB_AUTH_DIRECT_ENABLED: "false"
+      SKILLHUB_WEB_AUTH_DIRECT_PROVIDER: ""
+    depends_on:
+      server:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/nginx-health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
