@@ -246,16 +246,29 @@ make staging            # Full staging regression + smoke test
 
 ```bash
 make dev-all          # Start full stack: Postgres, Redis, MinIO, backend, frontend
+make dev              # Start only dependencies (Postgres, Redis, MinIO)
+make dev-scanner      # Start the optional security scanner (built locally, needs Docker Hub)
 make dev-all-down     # Stop everything
 make dev-all-reset    # Full reset (clears data volumes)
 make dev-status       # Check service status
 make dev-server-restart  # Restart backend after Java changes
+make trusted-header-test # Start the nginx trusted-header (SSO) test stack and assert it
+make trusted-header-test-down  # Stop the trusted-header test stack
 ```
 
 **Access points:**
 - Web UI: `http://localhost:3000`
 - Backend API: `http://localhost:8080`
-- Scanner: `http://localhost:8000`
+- MinIO: `http://localhost:9000` (console `http://localhost:9001`, `minioadmin` / `minioadmin`)
+- Scanner (optional): `http://localhost:8000`
+
+`make dev-all` starts the backend with `SKILLHUB_SECURITY_SCANNER_ENABLED=false` unless the scanner
+is already running, so a missing scanner never blocks local development. Dev logs under `.dev/` are
+rotated (previous run kept as `server.log.1`) instead of growing without bound.
+
+If the backend fails with `password authentication failed for user "skillhub"`, the dev Postgres
+volume was initialized with an older password (`POSTGRES_PASSWORD` only applies to an empty volume).
+`make dev` detects this; repair it without losing data with `make dev-db-repair`.
 
 **Local mock users** (no password needed):
 

@@ -130,7 +130,7 @@ services:
   # 安全扫描器（技能包静态/规则扫描，接内网 LLM 时填 SKILL_SCANNER_LLM_*）
   # ---------------------------------------------------------------------------
   skill-scanner:
-    image: ghcr.io/futurealab/skillhub-scanner:v0.2.221
+    image: ghcr.io/futurealab/skillhub-scanner:v0.2.222
     restart: unless-stopped
     platform: linux/amd64
     environment:
@@ -150,7 +150,7 @@ services:
   # 后端 API
   # ---------------------------------------------------------------------------
   server:
-    image: ghcr.io/futurealab/skillhub-server:v0.2.221
+    image: ghcr.io/futurealab/skillhub-server:v0.2.222
     restart: unless-stopped
     platform: linux/amd64
     ports:
@@ -259,7 +259,7 @@ services:
   # 前端（nginx 托管静态资源并反代 /api 到 server）
   # ---------------------------------------------------------------------------
   web:
-    image: ghcr.io/futurealab/skillhub-web:v0.2.221
+    image: ghcr.io/futurealab/skillhub-web:v0.2.222
     restart: unless-stopped
     platform: linux/amd64
     ports:

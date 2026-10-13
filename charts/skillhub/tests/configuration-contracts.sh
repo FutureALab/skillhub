@@ -117,6 +117,17 @@ grep -Fq 'key: auth-trusted-header-user-header' "$TMP_DIR/trusted-header.yaml" \
 grep -Fq 'name: SKILLHUB_WEB_AUTH_SESSION_BOOTSTRAP_ENABLED' "$TMP_DIR/trusted-header.yaml" \
   || fail "web deployment must surface the session-bootstrap entry"
 
+render trusted-header-per-request "$CHART_DIR" "${stable_args[@]}" \
+  --set auth.trustedHeader.enabled=true \
+  --set auth.trustedHeader.perRequestAuthentication=true \
+  >"$TMP_DIR/trusted-header-per-request.yaml"
+grep -Fq 'auth-trusted-header-per-request-authentication: "true"' "$TMP_DIR/trusted-header-per-request.yaml" \
+  || fail "Helm must render the trusted-header per-request switch"
+grep -Fq 'auth-session-bootstrap-enabled: "false"' "$TMP_DIR/trusted-header-per-request.yaml" \
+  || fail "per-request trusted headers must not expose the session-bootstrap endpoint"
+grep -Fq 'name: SKILLHUB_AUTH_TRUSTED_HEADER_PER_REQUEST_AUTHENTICATION' "$TMP_DIR/trusted-header-per-request.yaml" \
+  || fail "server deployment must inject the trusted-header per-request switch"
+
 render private-registry "$CHART_DIR" \
   --set server.dependencyWait.image.registry=registry.example.com \
   --set server.dependencyWait.image.repository=library/busybox \

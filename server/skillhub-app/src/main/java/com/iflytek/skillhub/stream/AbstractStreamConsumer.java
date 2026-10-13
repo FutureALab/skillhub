@@ -22,6 +22,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 
 public abstract class AbstractStreamConsumer<T> {
 
@@ -31,6 +32,16 @@ public abstract class AbstractStreamConsumer<T> {
     private static final int DEFAULT_MAX_RETRY_COUNT = 3;
     private static final int DEFAULT_READ_BATCH_SIZE = 10;
     private static final Duration POLL_TIMEOUT = Duration.ofSeconds(2);
+    /**
+     * Pause after a failed poll so an unavailable Redis cannot turn the consume loop into a hot
+     * spin.
+     */
+    private static final Duration FAILURE_BACKOFF = Duration.ofSeconds(1);
+    /**
+     * Upper bound on how often a repeated consume failure is logged with its stack trace. Logging
+     * every attempt made a single broken stream grow the log file to gigabytes.
+     */
+    private static final Duration FAILURE_LOG_INTERVAL = Duration.ofMinutes(1);
 
     private final RedissonClient redissonClient;
     private final String streamKey;
@@ -42,6 +53,8 @@ public abstract class AbstractStreamConsumer<T> {
     private final Duration reclaimInterval;
     private final MessageObservationSupport messageObservationSupport;
     private final AtomicBoolean running = new AtomicBoolean(false);
+    private final AtomicLong lastFailureLogNanos = new AtomicLong(0);
+    private volatile boolean degraded;
 
     private RStream<String, String> stream;
     private ExecutorService consumerExecutor;
@@ -143,17 +156,95 @@ public abstract class AbstractStreamConsumer<T> {
 
     private void consumeLoop() {
         while (running.get()) {
+            if (Thread.currentThread().isInterrupted()) {
+                break;
+            }
             try {
                 consumeAvailableMessages();
+                markConsumptionRecovered();
             } catch (Exception e) {
                 if (Thread.currentThread().isInterrupted()) {
                     Thread.currentThread().interrupt();
                     break;
                 }
-                log.error("Failed while consuming stream messages: stream={}, group={}, consumer={}",
-                        streamKey, groupName, consumerName, e);
+                handleConsumeFailure(e);
             }
         }
+    }
+
+    /**
+     * Recovers from a failed poll. A missing consumer group is recreated so a flushed stream or a
+     * restarted Redis heals itself, and repeated failures are logged at most once per
+     * {@link #FAILURE_LOG_INTERVAL} with a bounded pause between attempts.
+     */
+    void handleConsumeFailure(Exception error) {
+        boolean missingGroup = isMissingConsumerGroup(error);
+        if (missingGroup) {
+            initializeStreamAndGroup();
+        }
+        if (shouldLogConsumeFailure()) {
+            if (missingGroup) {
+                log.error("Consumer group missing; recreating: stream={}, group={}, consumer={}",
+                        streamKey, groupName, consumerName, error);
+            } else {
+                log.error("Failed while consuming stream messages: stream={}, group={}, consumer={}",
+                        streamKey, groupName, consumerName, error);
+            }
+        } else {
+            log.debug("Stream consumption is still failing: stream={}, group={}, consumer={}",
+                    streamKey, groupName, consumerName, error);
+        }
+        degraded = true;
+        pauseBeforeRetry();
+    }
+
+    private void markConsumptionRecovered() {
+        if (!degraded) {
+            return;
+        }
+        degraded = false;
+        lastFailureLogNanos.set(0);
+        log.info("Stream consumption recovered: stream={}, group={}, consumer={}",
+                streamKey, groupName, consumerName);
+    }
+
+    private boolean shouldLogConsumeFailure() {
+        long now = System.nanoTime();
+        long lastLog = lastFailureLogNanos.get();
+        if (lastLog != 0 && now - lastLog < FAILURE_LOG_INTERVAL.toNanos()) {
+            return false;
+        }
+        return lastFailureLogNanos.compareAndSet(lastLog, now);
+    }
+
+    private void pauseBeforeRetry() {
+        Duration backoff = failureBackoff();
+        if (backoff.isZero() || backoff.isNegative()) {
+            return;
+        }
+        try {
+            Thread.sleep(backoff.toMillis());
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    /**
+     * Pause applied after a failed poll. Overridable so tests do not have to wait.
+     */
+    protected Duration failureBackoff() {
+        return FAILURE_BACKOFF;
+    }
+
+    static boolean isMissingConsumerGroup(Throwable error) {
+        Throwable current = error;
+        while (current != null) {
+            if (current.getMessage() != null && current.getMessage().contains("NOGROUP")) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
     }
 
     private void safeReclaimPendingMessages() {

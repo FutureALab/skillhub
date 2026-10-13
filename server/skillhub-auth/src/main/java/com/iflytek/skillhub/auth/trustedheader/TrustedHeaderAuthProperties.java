@@ -21,6 +21,13 @@ public class TrustedHeaderAuthProperties {
     private boolean enabled = false;
 
     /**
+     * When enabled, every request carrying the configured headers signs in
+     * automatically through {@link TrustedHeaderAuthenticationFilter}, without any
+     * login-page round trip. Requires {@link #enabled} as well.
+     */
+    private boolean perRequestAuthentication = false;
+
+    /**
      * External provider code recorded on the identity binding. Keep it stable
      * once accounts exist, because changing it creates a new identity
      * coordinate.
@@ -63,6 +70,14 @@ public class TrustedHeaderAuthProperties {
 
     public void setEnabled(boolean enabled) {
         this.enabled = enabled;
+    }
+
+    public boolean isPerRequestAuthentication() {
+        return perRequestAuthentication;
+    }
+
+    public void setPerRequestAuthentication(boolean perRequestAuthentication) {
+        this.perRequestAuthentication = perRequestAuthentication;
     }
 
     public String getProviderCode() {

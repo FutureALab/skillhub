@@ -159,9 +159,10 @@
       "latest": "Latest",
       "demoSkills": {
         "weather": "Query real-time weather for cities worldwide",
-        "gitHelper": "Assisted Git workflows",
-        "diagramMaker": "Generate flowcharts and architecture diagrams",
-        "codeReviewer": "Automated code review",
+        "diagramDesign": "Design polished diagrams and illustrations",
+        "archify": "Turn code or designs into architecture diagrams",
+        "ponytail": "Solve problems with the least code; no over-engineering",
+        "planningWithFiles": "Plan and track work with file-based notes",
         "caption": "Interface preview · 4 sample skills"
       },
       "highlights": {

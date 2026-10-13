@@ -1,0 +1,31 @@
+# Trusted-header test gateway: http-level proxy defaults.
+#
+# TEST ONLY — DO NOT COPY INTO A REAL DEPLOYMENT.
+# `X-Test-User` / `X-Test-Email` let any caller impersonate any identity. That is what makes this
+# stack useful for exercising skillhub.auth.trusted-header.*, and it is exactly what a production
+# gateway must never do: a real forward-auth gateway (oauth2-proxy, Authelia, Authentik, nginx
+# auth_request ...) derives the identity from the authenticated session and overwrites these
+# headers on every request.
+
+map $http_x_test_user $skillhub_trusted_user {
+    default "${TRUSTED_HEADER_TEST_USER}";
+    "~."    $http_x_test_user;
+}
+
+map $http_x_test_email $skillhub_trusted_email {
+    default "${TRUSTED_HEADER_TEST_EMAIL}";
+    "~."    $http_x_test_email;
+}
+
+# The locations in default.conf.template deliberately declare no proxy_set_header of their own so
+# that every proxied request inherits these.
+proxy_set_header Host              $host;
+proxy_set_header X-Real-IP         $remote_addr;
+proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+proxy_set_header X-Forwarded-Proto $scheme;
+proxy_set_header X-Forwarded-Prefix "";
+
+# The trusted identity headers consumed by skillhub.auth.trusted-header.*
+proxy_set_header X-Auth-Request-User     $skillhub_trusted_user;
+proxy_set_header X-Forwarded-Email       $skillhub_trusted_email;
+proxy_set_header X-Skillhub-Proxy-Secret "${TRUSTED_HEADER_TEST_SECRET}";

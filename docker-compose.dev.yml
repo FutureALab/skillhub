@@ -1,0 +1,9 @@
+# Dev-only overlay, used by `make dev` / `make dev-all` / `make dev-scanner`.
+#
+# The security scanner is built from ./scanner, which needs Docker Hub access for its
+# python base image. Pointing SKILLHUB_SCANNER_IMAGE at a prebuilt image lets the scanner run
+# without a local build. This overlay is deliberately kept out of the bare
+# `docker compose up` and staging paths so their behavior does not change.
+services:
+  skill-scanner:
+    image: ${SKILLHUB_SCANNER_IMAGE:-skillhub-skill-scanner:local}

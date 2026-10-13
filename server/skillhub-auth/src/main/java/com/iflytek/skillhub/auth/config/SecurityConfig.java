@@ -7,6 +7,7 @@ import com.iflytek.skillhub.auth.oauth.OAuth2LoginFailureHandler;
 import com.iflytek.skillhub.auth.oauth.OAuth2LoginSuccessHandler;
 import com.iflytek.skillhub.auth.oauth.SkillHubOAuth2AuthorizationRequestResolver;
 import com.iflytek.skillhub.auth.mock.MockAuthFilter;
+import com.iflytek.skillhub.auth.trustedheader.TrustedHeaderAuthenticationFilter;
 import com.iflytek.skillhub.auth.policy.RouteSecurityPolicyRegistry;
 import com.iflytek.skillhub.auth.session.ExpiredPublicSessionFilter;
 import com.iflytek.skillhub.auth.session.CorruptSessionRemover;
@@ -71,6 +72,7 @@ public class SecurityConfig {
     private final AuthenticationEntryPoint apiAuthenticationEntryPoint;
     private final AccessDeniedHandler apiAccessDeniedHandler;
     private final ObjectProvider<MockAuthFilter> mockAuthFilterProvider;
+    private final ObjectProvider<TrustedHeaderAuthenticationFilter> trustedHeaderAuthenticationFilterProvider;
     private final RouteSecurityPolicyRegistry routeSecurityPolicyRegistry;
     private final CorruptSessionRemover corruptSessionRemover;
     private final String sessionCookieName;
@@ -86,6 +88,7 @@ public class SecurityConfig {
                           AuthenticationEntryPoint apiAuthenticationEntryPoint,
                           AccessDeniedHandler apiAccessDeniedHandler,
                           ObjectProvider<MockAuthFilter> mockAuthFilterProvider,
+                          ObjectProvider<TrustedHeaderAuthenticationFilter> trustedHeaderAuthenticationFilterProvider,
                           RouteSecurityPolicyRegistry routeSecurityPolicyRegistry,
                           ObjectProvider<CorruptSessionRemover> corruptSessionRemoverProvider,
                           @Value("${server.servlet.session.cookie.name:SESSION}") String sessionCookieName) {
@@ -100,6 +103,7 @@ public class SecurityConfig {
         this.apiAuthenticationEntryPoint = apiAuthenticationEntryPoint;
         this.apiAccessDeniedHandler = apiAccessDeniedHandler;
         this.mockAuthFilterProvider = mockAuthFilterProvider;
+        this.trustedHeaderAuthenticationFilterProvider = trustedHeaderAuthenticationFilterProvider;
         this.routeSecurityPolicyRegistry = routeSecurityPolicyRegistry;
         this.corruptSessionRemover = corruptSessionRemoverProvider.getIfAvailable(() -> sessionId -> {
             throw new IllegalStateException("Corrupt session recovery is not configured");
@@ -186,6 +190,11 @@ public class SecurityConfig {
         MockAuthFilter mockAuthFilter = mockAuthFilterProvider.getIfAvailable();
         if (mockAuthFilter != null) {
             http.addFilterBefore(mockAuthFilter, AnonymousAuthenticationFilter.class);
+        }
+        TrustedHeaderAuthenticationFilter trustedHeaderAuthenticationFilter =
+                trustedHeaderAuthenticationFilterProvider.getIfAvailable();
+        if (trustedHeaderAuthenticationFilter != null) {
+            http.addFilterBefore(trustedHeaderAuthenticationFilter, AnonymousAuthenticationFilter.class);
         }
 
         return http.build();

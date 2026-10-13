@@ -312,27 +312,33 @@ services:
 
 #### 信任标头接入（forward-auth 网关）
 
-开源版内置了一个信任标头的 `PassiveSessionAuthenticator` 实现（provider code 默认 `forward-auth`），
-用于 oauth2-proxy、Authelia、Authentik、nginx `auth_request` 等已经完成认证并注入身份标头的网关。
-网关认证浏览器后注入标头，登录页调用一次 `POST /api/v1/auth/session/bootstrap` 换取 SkillHub 自身的
-Spring Session，后续请求仍走第一方会话，不依赖每请求信任标头。
+开源版内置信任标头认证，用于 oauth2-proxy、Authelia、Authentik、nginx `auth_request` 等
+已经完成认证并注入身份标头的网关（provider code 默认 `forward-auth`）。提供两种模式：
+
+- **透明模式（每请求自动登录，不经登录页）**：`SKILLHUB_AUTH_TRUSTED_HEADER_ENABLED=true`
+  + `SKILLHUB_AUTH_TRUSTED_HEADER_PER_REQUEST_AUTHENTICATION=true`。每个带标头的请求都会
+  直接建立登录态（首次请求会落一个标准 Spring Session，后续请求复用）；无需 bootstrap 接口，
+  也无需前端开关。
+- **拉模型**：`SKILLHUB_AUTH_TRUSTED_HEADER_ENABLED=true` +
+  `SKILLHUB_AUTH_SESSION_BOOTSTRAP_ENABLED=true`，登录页调用一次
+  `POST /api/v1/auth/session/bootstrap` 换取会话。此模式还需要打开前端
+  `SKILLHUB_WEB_AUTH_SESSION_BOOTSTRAP_ENABLED=true` 且
+  `SKILLHUB_WEB_AUTH_SESSION_BOOTSTRAP_PROVIDER` 与 provider code 一致；
+  `SKILLHUB_WEB_AUTH_SESSION_BOOTSTRAP_AUTO=true` 会在登录页加载后自动尝试一次。
 
 后端开关（`compose.release.yml` 与 Helm chart 已透传以下变量）：
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
-| `SKILLHUB_AUTH_TRUSTED_HEADER_ENABLED` | `false` | 是否信任网关注入的身份标头 |
-| `SKILLHUB_AUTH_SESSION_BOOTSTRAP_ENABLED` | `false` | 必须同时为 `true`，否则 bootstrap 接口返回 `403` |
+| `SKILLHUB_AUTH_TRUSTED_HEADER_ENABLED` | `false` | 是否信任网关注入的身份标头（模式总开关） |
+| `SKILLHUB_AUTH_TRUSTED_HEADER_PER_REQUEST_AUTHENTICATION` | `false` | 透明模式：每请求自动登录，需要上面的开关同时为 `true` |
+| `SKILLHUB_AUTH_SESSION_BOOTSTRAP_ENABLED` | 拉模型必开 | 拉模型下必须为 `true`，否则 bootstrap 接口返回 `403`；透明模式不需要 |
 | `SKILLHUB_AUTH_TRUSTED_HEADER_PROVIDER_CODE` | `forward-auth` | 写入 `identity_binding.provider_code`，启用后不要修改 |
-| `SKILLHUB_AUTH_TRUSTED_HEADER_DISPLAY_NAME` | `Enterprise SSO` | 登录页展示名称 |
+| `SKILLHUB_AUTH_TRUSTED_HEADER_DISPLAY_NAME` | `Enterprise SSO` | 登录页展示名称（仅拉模型使用） |
 | `SKILLHUB_AUTH_TRUSTED_HEADER_USER_HEADER` | `X-Auth-Request-User` | 稳定外部用户标识，同时作为绑定 subject 与登录名 |
 | `SKILLHUB_AUTH_TRUSTED_HEADER_EMAIL_HEADER` | `X-Forwarded-Email` | 网关已验证的邮箱，可为空 |
 | `SKILLHUB_AUTH_TRUSTED_HEADER_SHARED_SECRET_HEADER` | `X-Skillhub-Proxy-Secret` | 网关回显共享密钥的标头名 |
 | `SKILLHUB_AUTH_TRUSTED_HEADER_SHARED_SECRET` | 空 | 共享密钥；为空时仅依赖网络隔离 |
-
-前端还需要打开 `SKILLHUB_WEB_AUTH_SESSION_BOOTSTRAP_ENABLED=true`，
-并把 `SKILLHUB_WEB_AUTH_SESSION_BOOTSTRAP_PROVIDER` 设为同一个 provider code；
-`SKILLHUB_WEB_AUTH_SESSION_BOOTSTRAP_AUTO=true` 会在登录页加载后自动尝试一次。
 
 安全要求：
 
@@ -341,6 +347,10 @@ Spring Session，后续请求仍走第一方会话，不依赖每请求信任标
 - 由于 `server.forward-headers-strategy=framework` 会把 `getRemoteAddr()` 重写为
   `X-Forwarded-For` 的值，应用内无法可靠校验网关来源网段，因此共享密钥或网络隔离是必需的控制项
 - 首次登录会按 `provider_code + subject` 自动建号，并授予新用户默认角色；不做邮箱合并
+- 既有会话与 API Token 优先于标头：标头只在当前请求没有登录态时生效；因为登录态会落成
+  Session，**透明模式下用户无法有效登出**（只要网关继续注入标头，下一个请求就会重新登录），
+  需要登出能力时必须依赖网关侧的登出并停止注入标头
+- 透明模式会为每个"带标头且无会话"的请求创建一个 Session；纯 API 客户端应改用 API Token
 
 开发环境：
 

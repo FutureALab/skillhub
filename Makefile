@@ -1,4 +1,4 @@
-.PHONY: build build-backend build-backend-app build-builtin-skills build-cli build-frontend build-web check clean cli-install db-reset dev dev-all dev-all-down dev-all-reset dev-down dev-logs dev-server dev-server-restart dev-status dev-web docs-build docs-dev docs-preview generate-api help lint-cli lint-web namespace-smoke suite-smoke suite-bundle-smoke parallel-down parallel-init parallel-sync parallel-up pr publish-cli publish-cli-major publish-cli-minor staging staging-down staging-logs test test-backend test-backend-app test-builtin-skills test-cli test-e2e-frontend test-e2e-smoke-frontend test-frontend test-redis-cluster test-web typecheck-cli typecheck-web validate-release-config web-deps web-install web-install-ci
+.PHONY: build build-backend build-backend-app build-builtin-skills build-cli build-frontend build-web check clean cli-install db-reset dev dev-all dev-all-down dev-all-reset dev-db-check dev-db-repair dev-down dev-logs dev-scanner dev-server dev-server-env dev-server-restart dev-status dev-web docs-build docs-dev docs-preview generate-api help lint-cli lint-web namespace-smoke suite-smoke suite-bundle-smoke parallel-down parallel-init parallel-sync parallel-up pr publish-cli publish-cli-major publish-cli-minor staging staging-down staging-logs test test-backend test-backend-app test-builtin-skills test-cli test-e2e-frontend test-e2e-smoke-frontend test-frontend test-redis-cluster test-web trusted-header-build trusted-header-smoke trusted-header-test trusted-header-test-down trusted-header-test-reset typecheck-cli typecheck-web validate-release-config web-deps web-install web-install-ci
 
 DEV_DIR := .dev
 DEV_SERVER_PID := $(DEV_DIR)/server.pid
@@ -15,13 +15,46 @@ STAGING_SERVER_IMAGE := skillhub-server:staging
 DEV_PROCESS := bash scripts/dev-process.sh
 DEV_SERVER_PREPARE := true
 DEV_SERVER_CMD := ./scripts/run-dev-app.sh
-DEV_SERVER_SCANNER_ENV := SKILLHUB_SECURITY_SCANNER_ENABLED=true SKILLHUB_SECURITY_SCANNER_URL=$(DEV_SCANNER_URL) SKILLHUB_SECURITY_SCANNER_MODE=upload
+# Dependency services started by `make dev` / `make dev-all`. The security scanner is intentionally
+# NOT here: it is built locally and needs Docker Hub access, which must not block the dev stack.
+DEV_DEPS_SERVICES ?= postgres redis minio
+# Backend dev environment derived from the services that are actually running.
+# Absolute so the launched process reads it after dev-process.sh switches to --cwd server.
+DEV_SERVER_ENV := $(CURDIR)/$(DEV_DIR)/server.env
+DEV_SERVER_LAUNCH := env $$(cat $(DEV_SERVER_ENV) 2>/dev/null | xargs) $(DEV_SERVER_CMD)
+DEV_SERVER_BACKGROUND := $(DEV_PROCESS) start --pid-file $(DEV_SERVER_PID) --log-file $(DEV_SERVER_LOG) --cwd server -- bash -lc '$(DEV_SERVER_PREPARE) && exec $(DEV_SERVER_LAUNCH)'
+# Set DEV_WITH_SCANNER=1 to start the scanner from `make dev-all` as well.
+DEV_WITH_SCANNER ?= 0
+# Prebuilt scanner image; when empty the scanner is built from ./scanner.
+DEV_SCANNER_IMAGE ?=
+# Set DEV_STORAGE_PROVIDER=s3 to run the dev backend against the bundled MinIO.
+DEV_STORAGE_PROVIDER ?= local
+DEV_S3_ENDPOINT ?= http://localhost:9000
+DEV_S3_BUCKET ?= skillhub
+DEV_S3_ACCESS_KEY ?= minioadmin
+DEV_S3_SECRET_KEY ?= minioadmin
+# Dev database credentials; must match docker-compose.yml and application-local.yml.
+DEV_DB_USER ?= skillhub
+DEV_DB_NAME ?= skillhub
+DEV_DB_PASSWORD ?= skillhub_dev
+
+# Trusted-header test stack (docker-compose.trusted-header.yml): nginx injects the identity headers.
+TRUSTED_HEADER_PROJECT ?= skillhub-th
+TRUSTED_HEADER_COMPOSE := docker compose -p $(TRUSTED_HEADER_PROJECT) -f docker-compose.trusted-header.yml
+TRUSTED_HEADER_GATEWAY_URL ?= http://localhost:8081
+TRUSTED_HEADER_DIRECT_URL ?= http://localhost:18080
+TRUSTED_HEADER_TEST_USER ?= gateway-user-1
+TRUSTED_HEADER_TEST_EMAIL ?= gateway-user-1@example.com
+# `${VAR-default}` semantics: pass TRUSTED_HEADER_TEST_SECRET= to disable the shared-secret check.
+TRUSTED_HEADER_TEST_SECRET ?= trusted-header-test-secret
+TRUSTED_HEADER_SERVER_IMAGE ?= skillhub-server:trusted-header-test
+TRUSTED_HEADER_SERVER_BASE_IMAGE ?= ghcr.io/futurealab/skillhub-server:v0.2.222
 BACKEND_TEST_JAVA_OPTIONS ?= -XX:+EnableDynamicAgentLoading
 PARALLEL_BASE_REF ?= origin/main
 PARALLEL_WORKTREE_ROOT ?=
 DEV_COMPOSE_PROJECT_NAME ?= skillhub
 STAGING_COMPOSE_PROJECT_NAME ?= skillhub-staging
-DEV_COMPOSE := docker compose -p $(DEV_COMPOSE_PROJECT_NAME)
+DEV_COMPOSE := docker compose -p $(DEV_COMPOSE_PROJECT_NAME) -f docker-compose.yml -f docker-compose.dev.yml
 STAGING_BASE_COMPOSE := docker compose -p $(STAGING_COMPOSE_PROJECT_NAME)
 STAGING_COMPOSE := $(STAGING_BASE_COMPOSE) -f docker-compose.yml -f docker-compose.staging.yml
 
@@ -29,21 +62,95 @@ help: ## 显示帮助
 	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | \
 		awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-15s\033[0m %s\n", $$1, $$2}'
 
-dev: ## 启动本地开发环境（依赖服务，含 skill-scanner）
-	$(DEV_COMPOSE) up -d --wait --remove-orphans
-	@echo "Services ready."
+dev: ## 启动本地开发依赖服务（Postgres + Redis + MinIO）
+	$(DEV_COMPOSE) up -d --wait --remove-orphans $(DEV_DEPS_SERVICES)
+	@$(MAKE) --no-print-directory dev-db-check
+	@$(MAKE) --no-print-directory dev-server-env
+	@echo "Dependency services ready:"
+	@echo "  Postgres: localhost:5432 (user skillhub / password skillhub_dev / db skillhub)"
+	@echo "  Redis:    localhost:6379"
+	@echo "  MinIO:    http://localhost:9000  (console http://localhost:9001, minioadmin / minioadmin)"
 	@echo "Start backend with: make dev-server"
 	@echo "Start frontend with: make dev-web"
+	@echo "Start the security scanner with: make dev-scanner"
 
-dev-all: ## 一键启动本地开发环境（依赖 + scanner + 后端 + 前端）
+dev-db-check: ## 校验开发数据库凭据是否与配置一致
+	@if ! $(DEV_COMPOSE) ps --status running --services 2>/dev/null | grep -qx postgres; then \
+		echo "Postgres container is not running. Start it with: make dev"; \
+		exit 1; \
+	fi; \
+	if $(DEV_COMPOSE) exec -T postgres sh -c 'PGPASSWORD="$$POSTGRES_PASSWORD" psql -h "$$(hostname -i)" -U $(DEV_DB_USER) -d $(DEV_DB_NAME) -tAc "select 1" >/dev/null 2>&1'; then \
+		echo "Postgres credentials OK ($(DEV_DB_USER)@$(DEV_DB_NAME))."; \
+	else \
+		echo ""; \
+		echo "Postgres rejected the dev credentials for role '$(DEV_DB_USER)'."; \
+		echo "POSTGRES_PASSWORD is only applied when the data volume is first created, so an"; \
+		echo "existing volume can keep an older password."; \
+		echo ""; \
+		echo "  修复（保留数据）: make dev-db-repair"; \
+		echo "  完全重置（删数据）: make dev-all-reset"; \
+		echo ""; \
+		exit 1; \
+	fi
+
+dev-db-repair: ## 将开发数据库密码同步为配置期望值（保留数据）
+	$(DEV_COMPOSE) exec -T postgres psql -U $(DEV_DB_USER) -d $(DEV_DB_NAME) \
+		-c "ALTER ROLE $(DEV_DB_USER) WITH PASSWORD '$(DEV_DB_PASSWORD)';"
+	@$(MAKE) --no-print-directory dev-db-check
+
+dev-scanner: ## 启动安全扫描服务（可用 DEV_SCANNER_IMAGE 指定预构建镜像）
+	@if [ -n "$(DEV_SCANNER_IMAGE)" ]; then \
+		echo "Starting scanner from DEV_SCANNER_IMAGE=$(DEV_SCANNER_IMAGE)..."; \
+		SKILLHUB_SCANNER_IMAGE=$(DEV_SCANNER_IMAGE) $(DEV_COMPOSE) up -d --wait skill-scanner \
+			|| { echo "Scanner failed to start. Check the image reference or Docker Hub access."; exit 1; }; \
+	else \
+		echo "Starting scanner (SKILLHUB_SCANNER_IMAGE=${SKILLHUB_SCANNER_IMAGE:-unset}, builds from ./scanner when no image is configured)..."; \
+		$(DEV_COMPOSE) up -d --wait skill-scanner \
+			|| { \
+				echo ""; \
+				echo "Scanner failed to start. The local build needs Docker Hub access for"; \
+				echo "python:3.11-slim-bookworm. Retry with a prebuilt image instead:"; \
+				echo "  make dev-scanner DEV_SCANNER_IMAGE=<registry>/skillhub-scanner:<tag>"; \
+				exit 1; \
+			}; \
+	fi
+	@$(MAKE) --no-print-directory dev-server-env
+	@echo "Scanner ready on $(DEV_SCANNER_URL)."
+	@echo "If the backend is already running, run: make dev-server-restart"
+
+dev-server-env: ## 依据当前运行的服务生成后端开发环境变量
+	@mkdir -p $(DEV_DIR)
+	@{ \
+		if curl -sf $(DEV_SCANNER_URL)/health >/dev/null 2>&1; then \
+			echo "SKILLHUB_SECURITY_SCANNER_ENABLED=true"; \
+			echo "SKILLHUB_SECURITY_SCANNER_URL=$(DEV_SCANNER_URL)"; \
+			echo "SKILLHUB_SECURITY_SCANNER_MODE=upload"; \
+		else \
+			echo "SKILLHUB_SECURITY_SCANNER_ENABLED=false"; \
+		fi; \
+		if [ "$(DEV_STORAGE_PROVIDER)" = "s3" ]; then \
+			echo "SKILLHUB_STORAGE_PROVIDER=s3"; \
+			echo "SKILLHUB_STORAGE_S3_ENDPOINT=$(DEV_S3_ENDPOINT)"; \
+			echo "SKILLHUB_STORAGE_S3_BUCKET=$(DEV_S3_BUCKET)"; \
+			echo "SKILLHUB_STORAGE_S3_ACCESS_KEY=$(DEV_S3_ACCESS_KEY)"; \
+			echo "SKILLHUB_STORAGE_S3_SECRET_KEY=$(DEV_S3_SECRET_KEY)"; \
+			echo "SKILLHUB_STORAGE_S3_FORCE_PATH_STYLE=true"; \
+			echo "SKILLHUB_STORAGE_S3_AUTO_CREATE_BUCKET=true"; \
+		fi; \
+	} > $(DEV_SERVER_ENV)
+
+dev-all: ## 一键启动本地开发环境（Postgres + Redis + MinIO + 后端 + 前端）
 	@mkdir -p $(DEV_DIR)
 	@$(MAKE) dev
 	@$(MAKE) web-deps
+	@if [ "$(DEV_WITH_SCANNER)" = "1" ]; then \
+		$(MAKE) --no-print-directory dev-scanner || echo "Scanner could not be started; continuing without security scanning."; \
+	fi
 	@if $(DEV_PROCESS) status --pid-file $(DEV_SERVER_PID) >/dev/null 2>&1; then \
 		echo "Backend already running with PID $$(cat $(DEV_SERVER_PID))"; \
 	else \
 		echo "Starting backend..."; \
-		$(DEV_PROCESS) start --pid-file $(DEV_SERVER_PID) --log-file $(DEV_SERVER_LOG) --cwd server -- bash -lc '$(DEV_SERVER_PREPARE) && exec env $(DEV_SERVER_SCANNER_ENV) $(DEV_SERVER_CMD)' >/dev/null; \
+		$(DEV_SERVER_BACKGROUND) >/dev/null; \
 	fi
 	@if $(DEV_PROCESS) status --pid-file $(DEV_WEB_PID) >/dev/null 2>&1; then \
 		echo "Frontend already running with PID $$(cat $(DEV_WEB_PID))"; \
@@ -69,7 +176,7 @@ dev-all: ## 一键启动本地开发环境（依赖 + scanner + 后端 + 前端�
 			echo "Backend did not become ready on attempt $$attempt. Restarting..."; \
 			$(DEV_PROCESS) stop --pid-file $(DEV_SERVER_PID); \
 			sleep 2; \
-			$(DEV_PROCESS) start --pid-file $(DEV_SERVER_PID) --log-file $(DEV_SERVER_LOG) --cwd server -- bash -lc '$(DEV_SERVER_PREPARE) && exec env $(DEV_SERVER_SCANNER_ENV) $(DEV_SERVER_CMD)' >/dev/null; \
+			$(DEV_SERVER_BACKGROUND) >/dev/null; \
 		fi; \
 	done; \
 		if [ "$$backend_ready" -ne 1 ]; then \
@@ -87,19 +194,11 @@ dev-all: ## 一键启动本地开发环境（依赖 + scanner + 后端 + 前端�
 			echo ""; \
 			exit 1; \
 		fi
-	@echo "Waiting for scanner on $(DEV_SCANNER_URL) ..."
-	@scanner_ready=0; \
-	for i in $$(seq 1 30); do \
-		if curl -sf $(DEV_SCANNER_URL)/health >/dev/null; then \
-			echo "Scanner ready."; \
-			scanner_ready=1; \
-			break; \
-		fi; \
-		sleep 2; \
-	done; \
-	if [ "$$scanner_ready" -ne 1 ]; then \
-		echo "Scanner failed to become ready. Check docker compose logs."; \
-		exit 1; \
+	@if curl -sf $(DEV_SCANNER_URL)/health >/dev/null 2>&1; then \
+		echo "Scanner ready."; \
+	else \
+		echo "Security scanner is not running; the backend was started with SKILLHUB_SECURITY_SCANNER_ENABLED=false."; \
+		echo "  Enable it later with: make dev-scanner && make dev-server-restart"; \
 	fi
 	@echo "Waiting for frontend on $(DEV_WEB_URL) ..."
 	@frontend_ready=0; \
@@ -118,7 +217,8 @@ dev-all: ## 一键启动本地开发环境（依赖 + scanner + 后端 + 前端�
 	@echo "Local environment is ready:"
 	@echo "  Web UI:  $(DEV_WEB_URL)"
 	@echo "  Backend: $(DEV_API_URL)"
-	@echo "  Scanner: $(DEV_SCANNER_URL)"
+	@echo "  MinIO:   http://localhost:9000  (console http://localhost:9001, minioadmin / minioadmin)"
+	@echo "  Scanner: $(DEV_SCANNER_URL) (optional: make dev-scanner)"
 	@echo "Mock auth users:"
 	@echo "  local-user  -> X-Mock-User-Id: local-user"
 	@echo "  local-admin -> X-Mock-User-Id: local-admin"
@@ -127,12 +227,14 @@ dev-all: ## 一键启动本地开发环境（依赖 + scanner + 后端 + 前端�
 	@echo "  Frontend: $(DEV_WEB_LOG)"
 
 dev-server: ## 启动后端开发服务器
-	cd server && bash -lc '$(DEV_SERVER_PREPARE) && exec env $(DEV_SERVER_SCANNER_ENV) $(DEV_SERVER_CMD)'
+	@$(MAKE) --no-print-directory dev-server-env
+	cd server && bash -lc '$(DEV_SERVER_PREPARE) && exec $(DEV_SERVER_LAUNCH)'
 
 dev-server-restart: ## 重启后端开发服务器
 	@mkdir -p $(DEV_DIR)
+	@$(MAKE) --no-print-directory dev-server-env
 	@$(DEV_PROCESS) stop --pid-file $(DEV_SERVER_PID)
-	@$(DEV_PROCESS) start --pid-file $(DEV_SERVER_PID) --log-file $(DEV_SERVER_LOG) --cwd server -- bash -lc '$(DEV_SERVER_PREPARE) && exec env $(DEV_SERVER_SCANNER_ENV) $(DEV_SERVER_CMD)' >/dev/null
+	@$(DEV_SERVER_BACKGROUND) >/dev/null
 	@echo "Waiting for backend on $(DEV_API_URL) ..."
 	@for i in $$(seq 1 30); do \
 		if curl -sf $(DEV_API_URL)/actuator/health >/dev/null; then \
@@ -153,15 +255,15 @@ suite-smoke: ## 运行 Skill Suite 生命周期 smoke test
 suite-bundle-smoke: ## 运行带真实认证的 Suite Bundle 创建/更新 smoke test
 	./scripts/suite-bundle-smoke-test.sh $(DEV_API_URL)
 
-dev-down: ## 停止本地开发环境（含 skill-scanner）
+dev-down: ## 停止本地开发依赖服务（Postgres + Redis + MinIO）
 	$(DEV_COMPOSE) down --remove-orphans
 
-dev-all-down: ## 停止本地开发环境（依赖 + scanner + 后端 + 前端）
+dev-all-down: ## 停止本地开发环境（依赖 + 后端 + 前端）
 	@$(DEV_PROCESS) stop --pid-file $(DEV_SERVER_PID)
 	@$(DEV_PROCESS) stop --pid-file $(DEV_WEB_PID)
 	@$(MAKE) dev-down
 
-dev-all-reset: ## 重置本地开发环境（清理依赖数据卷后重新启动）
+dev-all-reset: ## 重置本地开发环境（清理 Postgres/Redis/MinIO 数据卷后重新启动）
 	@$(DEV_PROCESS) stop --pid-file $(DEV_SERVER_PID)
 	@$(DEV_PROCESS) stop --pid-file $(DEV_WEB_PID)
 	$(DEV_COMPOSE) down -v --remove-orphans
@@ -184,6 +286,45 @@ dev-status: ## 查看本地开发服务状态
 	else \
 		echo "  Not running"; \
 	fi
+
+# --- trusted-header test stack: nginx injects the identity headers on every backend request -----
+
+trusted-header-build: ## 构建标头认证测试镜像（当前源码 jar 叠加到已发布运行时镜像）
+	cd server && ./mvnw -pl skillhub-app -am package -DskipTests -B -q
+	cd server && docker build --pull=false \
+		-f Dockerfile.overlay \
+		--build-arg SERVER_BASE_IMAGE=$(TRUSTED_HEADER_SERVER_BASE_IMAGE) \
+		-t $(TRUSTED_HEADER_SERVER_IMAGE) .
+
+trusted-header-test: ## 启动标头认证测试栈（postgres/redis/后端/nginx 网关）并运行断言
+	@$(MAKE) --no-print-directory trusted-header-build
+	@TRUSTED_HEADER_SERVER_IMAGE=$(TRUSTED_HEADER_SERVER_IMAGE) \
+	 TRUSTED_HEADER_TEST_USER=$(TRUSTED_HEADER_TEST_USER) \
+	 TRUSTED_HEADER_TEST_EMAIL=$(TRUSTED_HEADER_TEST_EMAIL) \
+	 TRUSTED_HEADER_TEST_SECRET=$(TRUSTED_HEADER_TEST_SECRET) \
+	 $(TRUSTED_HEADER_COMPOSE) up -d --wait
+	@echo ""
+	@echo "Trusted-header test stack is up:"
+	@echo "  Gateway (headers injected): $(TRUSTED_HEADER_GATEWAY_URL)"
+	@echo "  Backend (direct, no headers): $(TRUSTED_HEADER_DIRECT_URL)"
+	@echo "  Try: curl -s $(TRUSTED_HEADER_GATEWAY_URL)/api/v1/auth/me"
+	@echo ""
+	@TRUSTED_HEADER_TEST_USER=$(TRUSTED_HEADER_TEST_USER) \
+	 TRUSTED_HEADER_TEST_EMAIL=$(TRUSTED_HEADER_TEST_EMAIL) \
+	 TRUSTED_HEADER_TEST_SECRET=$(TRUSTED_HEADER_TEST_SECRET) \
+	 ./scripts/trusted-header-smoke-test.sh $(TRUSTED_HEADER_GATEWAY_URL) $(TRUSTED_HEADER_DIRECT_URL)
+
+trusted-header-smoke: ## 只运行标头认证断言（测试栈需已启动）
+	@TRUSTED_HEADER_TEST_USER=$(TRUSTED_HEADER_TEST_USER) \
+	 TRUSTED_HEADER_TEST_EMAIL=$(TRUSTED_HEADER_TEST_EMAIL) \
+	 TRUSTED_HEADER_TEST_SECRET=$(TRUSTED_HEADER_TEST_SECRET) \
+	 ./scripts/trusted-header-smoke-test.sh $(TRUSTED_HEADER_GATEWAY_URL) $(TRUSTED_HEADER_DIRECT_URL)
+
+trusted-header-test-down: ## 停止标头认证测试栈
+	$(TRUSTED_HEADER_COMPOSE) down --remove-orphans
+
+trusted-header-test-reset: ## 停止标头认证测试栈并清空其数据卷
+	$(TRUSTED_HEADER_COMPOSE) down -v --remove-orphans
 
 dev-logs: ## 实时查看开发服务日志（backend/frontend，默认 backend）
 	@SERVICE=$${SERVICE:-backend}; \

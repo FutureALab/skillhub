@@ -60,15 +60,22 @@ helm -n skillhub upgrade -i skillhub ./charts/skillhub \
 
 若上游 forward-auth 网关（oauth2-proxy、Authelia、Authentik 等）已完成认证并注入身份标头，
 可设置 `auth.trustedHeader.enabled=true` 接入：网关注入 `userHeader`（默认
-`X-Auth-Request-User`，作为稳定用户标识）与 `emailHeader`（默认 `X-Forwarded-Email`），
-登录页通过 `POST /api/v1/auth/session/bootstrap` 换取 SkillHub 会话。该开关会自动打开
-`auth.sessionBootstrap`，并把 provider code 默认设为 `forward-auth`（可用
-`auth.sessionBootstrap.provider` 覆盖）。可选：
-`auth.sessionBootstrap.auto=true` 在登录页加载后自动尝试一次；
-`secrets.trustedHeaderSharedSecret` 要求网关回显共享密钥。
+`X-Auth-Request-User`，作为稳定用户标识）与 `emailHeader`（默认 `X-Forwarded-Email`）。
+两种模式：
+
+- **透明模式（推荐给"完全不经登录页"的诉求）**：再设置
+  `auth.trustedHeader.perRequestAuthentication=true`，每个带标头的请求自动登录，
+  登录页和 bootstrap 接口都不再需要（`auth.sessionBootstrap` 保持关闭）。
+- **拉模型**：登录页通过 `POST /api/v1/auth/session/bootstrap` 换取 SkillHub 会话。
+  开启 `auth.trustedHeader.enabled` 会自动打开 `auth.sessionBootstrap`，并把 provider code
+  默认设为 `forward-auth`（可用 `auth.sessionBootstrap.provider` 覆盖）；
+  可选 `auth.sessionBootstrap.auto=true` 在登录页加载后自动尝试一次。
+
+两种模式都可用 `secrets.trustedHeaderSharedSecret` 要求网关回显共享密钥。
 
 > **安全要求：** 打开该开关后，任何能直连 server 并伪造这些标头的人都能以任意用户登录。
-> 必须保证只能经网关访问 server，并由网关覆写（而非追加）相关标头。
+> 必须保证只能经网关访问 server，并由网关覆写（而非追加）相关标头。透明模式下用户也无法
+> 有效登出：只要网关仍在注入标头，下一个请求就会重新登录。
 
 > **Ingress values 迁移：** 当前版本只支持结构化的 `ingress.hosts[]` 和
 > `ingress.tls[]`。旧的 `ingress.host`、`ingress.tls.enabled` 与

@@ -2,6 +2,10 @@ package com.iflytek.skillhub.stream;
 
 import com.iflytek.skillhub.observability.MessageObservationSupport;
 import com.iflytek.skillhub.observability.RequestIdAccessor;
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import io.micrometer.observation.ObservationRegistry;
 import io.lettuce.core.RedisBusyException;
 import org.junit.jupiter.api.Test;
@@ -9,7 +13,9 @@ import org.redisson.api.AutoClaimResult;
 import org.redisson.api.RStream;
 import org.redisson.api.RedissonClient;
 import org.redisson.api.StreamMessageId;
+import org.redisson.api.stream.StreamCreateGroupArgs;
 import org.redisson.api.stream.StreamReadGroupArgs;
+import org.slf4j.LoggerFactory;
 import org.springframework.data.redis.RedisSystemException;
 
 import java.time.Duration;
@@ -185,6 +191,66 @@ class AbstractStreamConsumerTest {
         assertThat(AbstractStreamConsumer.isConsumerGroupAlreadyExists(wrapped)).isTrue();
     }
 
+    @Test
+    void detectsMissingConsumerGroupInNestedCause() {
+        RedisSystemException wrapped = new RedisSystemException(
+                "Error in execution",
+                new IllegalStateException("NOGROUP No such key 'scan-stream' or consumer group 'scan-group'")
+        );
+
+        assertThat(AbstractStreamConsumer.isMissingConsumerGroup(wrapped)).isTrue();
+        assertThat(AbstractStreamConsumer.isMissingConsumerGroup(
+                new IllegalStateException("connection refused"))).isFalse();
+    }
+
+    @Test
+    void handleConsumeFailure_recreatesMissingConsumerGroup() {
+        @SuppressWarnings("unchecked")
+        RStream<String, String> stream = mock(RStream.class);
+        TestConsumer consumer = new TestConsumer(stream);
+
+        consumer.handleConsumeFailure(new RedisSystemException(
+                "Error in execution",
+                new IllegalStateException("NOGROUP No such key 'scan-stream' or consumer group 'scan-group'")));
+
+        verify(stream).createGroup(any(StreamCreateGroupArgs.class));
+    }
+
+    @Test
+    void handleConsumeFailure_doesNotRecreateGroupForUnrelatedFailures() {
+        @SuppressWarnings("unchecked")
+        RStream<String, String> stream = mock(RStream.class);
+        TestConsumer consumer = new TestConsumer(stream);
+
+        consumer.handleConsumeFailure(new IllegalStateException("connection refused"));
+
+        verify(stream, never()).createGroup(any(StreamCreateGroupArgs.class));
+    }
+
+    @Test
+    void handleConsumeFailure_rateLimitsRepeatedErrorLogging() {
+        @SuppressWarnings("unchecked")
+        RStream<String, String> stream = mock(RStream.class);
+        TestConsumer consumer = new TestConsumer(stream);
+        Logger logger = (Logger) LoggerFactory.getLogger(TestConsumer.class);
+        Level previousLevel = logger.getLevel();
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        logger.setLevel(Level.ERROR);
+        try {
+            for (int i = 0; i < 50; i++) {
+                consumer.handleConsumeFailure(new IllegalStateException("redis unavailable"));
+            }
+        } finally {
+            logger.detachAppender(appender);
+            logger.setLevel(previousLevel);
+            appender.stop();
+        }
+
+        assertThat(appender.list).hasSize(1);
+    }
+
     private static class TestConsumer extends AbstractStreamConsumer<String> {
         private final RStream<String, String> stream;
         private final RequestIdAccessor requestIdAccessor;
@@ -225,6 +291,11 @@ class AbstractStreamConsumerTest {
         @Override
         protected String consumerPrefix() {
             return "test";
+        }
+
+        @Override
+        protected Duration failureBackoff() {
+            return Duration.ZERO;
         }
 
         @Override

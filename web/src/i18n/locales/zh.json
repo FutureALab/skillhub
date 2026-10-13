@@ -159,9 +159,10 @@
       "latest": "最新发布",
       "demoSkills": {
         "weather": "查询全球城市实时天气",
-        "gitHelper": "智能 Git 操作辅助",
-        "diagramMaker": "生成流程图和架构图",
-        "codeReviewer": "自动代码审查",
+        "diagramDesign": "设计与绘制高质量图表和示意图",
+        "archify": "从代码或描述生成系统架构图",
+        "ponytail": "用最简方案解决问题，拒绝过度设计",
+        "planningWithFiles": "用文件记录任务拆解与执行计划",
         "caption": "界面预览 · 4 个示例技能"
       },
       "highlights": {

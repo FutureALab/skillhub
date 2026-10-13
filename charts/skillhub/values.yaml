@@ -25,7 +25,7 @@ auth:
     passwordLoginEnabled: true
     selfRegistrationEnabled: true
   # 企业 SSO 被动会话入口（POST /api/v1/auth/session/bootstrap）。
-  # trustedHeader.enabled=true 时后端会强制开启，无需重复设置。
+  # trustedHeader.enabled=true 且未开启 perRequestAuthentication 时后端会自动开启。
   sessionBootstrap:
     enabled: false
     # 留空时回退到 auth.trustedHeader.providerCode
@@ -35,6 +35,8 @@ auth:
   # 信任上游 forward-auth 网关注入的身份标头（如 oauth2-proxy / Authelia）
   trustedHeader:
     enabled: false
+    # true：每个带标头的请求自动登录，完全不经登录页（Open WebUI 式透明模式）
+    perRequestAuthentication: false
     providerCode: forward-auth
     displayName: Enterprise SSO
     userHeader: X-Auth-Request-User

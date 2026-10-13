@@ -26,6 +26,84 @@ This starts:
 
 SkillHub now pins a shared Docker Compose project name for local development, so multiple git worktrees can reuse the same dependency containers instead of fighting over `5432`, `6379`, and `9000`.
 
+Dependency endpoints:
+
+| Service  | Endpoint | Credentials |
+|----------|----------|-------------|
+| Postgres | `localhost:5432/skillhub` | `skillhub` / `skillhub_dev` |
+| Redis    | `localhost:6379` | none |
+| MinIO    | http://localhost:9000 (console http://localhost:9001) | `minioadmin` / `minioadmin` |
+
+The dev backend uses local file storage by default. To run it against the bundled MinIO instead:
+
+```bash
+make dev-all DEV_STORAGE_PROVIDER=s3
+```
+
+### Security scanner (optional)
+
+`make dev-all` does **not** start the security scanner: it is built from `./scanner` and needs Docker
+Hub access for its Python base image, which is slow and can fail offline. Without it the backend is
+started with `SKILLHUB_SECURITY_SCANNER_ENABLED=false`, so publishing still works.
+
+To enable scanning:
+
+```bash
+make dev-scanner            # builds ./scanner, or uses SKILLHUB_SCANNER_IMAGE when set
+make dev-server-restart     # restarts the backend with scanning enabled
+```
+
+If the local build cannot reach Docker Hub, run the scanner from a prebuilt image:
+
+```bash
+make dev-scanner DEV_SCANNER_IMAGE=ghcr.io/futurealab/skillhub-scanner:v0.2.222
+```
+
+Set `DEV_WITH_SCANNER=1` to have `make dev-all` attempt the scanner as part of the startup.
+
+### Trusted-header (SSO) test stack
+
+`docker-compose.trusted-header.yml` is a self-contained stack whose whole purpose is to exercise
+trusted-header authentication: **nginx sits in front of the backend and injects the identity headers
+on every forwarded request**, which is what a forward-auth gateway (oauth2-proxy, Authelia,
+Authentik, nginx `auth_request`) does in production.
+
+```bash
+make trusted-header-test        # build the current source + start the stack + run assertions
+make trusted-header-smoke       # re-run the assertions only
+make trusted-header-test-down   # stop
+make trusted-header-test-reset  # stop and drop its volumes
+```
+
+Endpoints:
+
+| URL | What it is |
+|-----|------------|
+| http://localhost:8081 | The gateway. Headers are injected, so `/api/v1/auth/me` answers with the injected user and the SPA signs in without a login page. |
+| http://localhost:18080 | The backend directly, with no headers. Used to prove that bypassing the gateway is rejected. |
+
+What the stack does:
+
+- Backend runs with `SKILLHUB_AUTH_TRUSTED_HEADER_ENABLED=true` and
+  `SKILLHUB_AUTH_TRUSTED_HEADER_PER_REQUEST_AUTHENTICATION=true`, so every request carrying the
+  headers is signed in (no login page, no bootstrap call).
+- The gateway injects `X-Auth-Request-User`, `X-Forwarded-Email` and `X-Skillhub-Proxy-Secret`.
+- `X-Test-User` / `X-Test-Email` on a request override the injected identity, which makes it easy to
+  switch users (each new one is provisioned on first sight):
+  `curl -H 'X-Test-User: alice' http://localhost:8081/api/v1/auth/me`
+- The assertions also cover the negative paths: a direct request without headers, and one with a
+  missing or wrong shared secret, must both return `401`.
+
+Values can be overridden at invocation time, e.g.
+`make trusted-header-test TRUSTED_HEADER_TEST_USER=alice TRUSTED_HEADER_TEST_EMAIL=alice@corp.example`,
+or `TRUSTED_HEADER_TEST_SECRET=` to run without the shared secret (the secret assertions are then
+skipped). `TRUSTED_HEADER_SERVER_BASE_IMAGE` selects the runtime image the locally built jar is
+layered onto.
+
+> **Test-only:** the `X-Test-User` override is an impersonation backdoor by design. Never copy
+> `docker/trusted-header/*.conf.template` into a real gateway, where the identity must come from the
+> authenticated session.
+
 ### Backend restarts
 
 **Frontend:** Vite HMR is enabled by default. Save a file and the browser updates instantly.
@@ -62,15 +140,48 @@ or the Compose environment.
 
 | Command                          | Description                      |
 |----------------------------------|----------------------------------|
-| `make dev-all`                   | Start full local stack           |
+| `make dev-all`                   | Start full local stack (deps + backend + frontend) |
+| `make dev`                       | Start only dependencies (Postgres/Redis/MinIO) |
+| `make dev-scanner`               | Start the optional security scanner |
+| `make trusted-header-test`       | Start the trusted-header (SSO) test stack and assert it |
+| `make trusted-header-smoke`      | Re-run the trusted-header assertions |
+| `make trusted-header-test-down`  | Stop the trusted-header test stack |
 | `make dev-all-down`              | Stop all local services          |
 | `make dev-status`                | Check status of all services     |
 | `make dev-logs`                  | Tail backend logs                |
 | `SERVICE=frontend make dev-logs` | Tail frontend logs               |
 | `make dev-all-reset`             | Full reset (clears data volumes) |
+| `make dev-db-check`              | Verify the dev database credentials |
+| `make dev-db-repair`             | Sync the dev database password (keeps data) |
 | `make dev-server-restart`        | Restart backend after Java changes |
 | `make namespace-smoke`           | Run namespace workflow smoke test |
 | `make db-reset`                  | Reset database only              |
+
+### Troubleshooting the local stack
+
+**Backend log shows `FATAL: password authentication failed for user "skillhub"`.**
+`POSTGRES_PASSWORD` in `docker-compose.yml` is applied only when the Postgres data volume is first
+created, so a volume created earlier can keep a different password while the backend keeps using the
+password from `application-local.yml`. `make dev` now runs `make dev-db-check` and fails with this
+explanation. Repair it in place (no data loss):
+
+```bash
+make dev-db-repair
+```
+
+Or drop all dev data with `make dev-all-reset`. Note that inside the container `127.0.0.1`
+connections use `trust` auth, so testing the password with a plain
+`docker compose exec postgres psql -h 127.0.0.1` proves nothing — `make dev-db-check` connects over
+the container's non-loopback address so the password is actually verified.
+
+**`make dev-all` fails while building the scanner.** The scanner is built from `./scanner` and needs
+Docker Hub access. It is optional: use `make dev-scanner` (or
+`make dev-scanner DEV_SCANNER_IMAGE=<image>`), and see the section above.
+
+**`.dev/server.log` grew very large.** Logs are rotated on start (the previous run is kept as
+`.dev/server.log.1`) and capped by `DEV_LOG_MAX_BYTES` (default 64 MiB). A stream consumer that
+cannot read its Redis stream now recreates the consumer group and rate-limits its error logging
+instead of spinning.
 
 ### Claude + Codex parallel workflow
 

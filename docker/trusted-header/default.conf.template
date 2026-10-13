@@ -1,0 +1,52 @@
+# Trusted-header test gateway: server/location layout.
+#
+# Serves the SPA from the published web image and forwards everything that belongs to the backend
+# through the upstream, where 00-proxy-headers.conf.template injects the trusted identity headers.
+server_tokens off;
+
+server {
+    listen 80;
+    server_name _;
+    root /usr/share/nginx/html;
+    index index.html;
+
+    client_max_body_size 100M;
+
+    location = /nginx-health {
+        add_header Content-Type text/plain;
+        return 200 'ok';
+    }
+
+    # Backend routes. No proxy_set_header here: they are inherited from the http level so every
+    # single forwarded request carries the trusted identity headers.
+    location /api/ {
+        proxy_pass ${TRUSTED_HEADER_UPSTREAM};
+    }
+
+    location /oauth2/ {
+        proxy_pass ${TRUSTED_HEADER_UPSTREAM};
+    }
+
+    location /login/oauth2/ {
+        proxy_pass ${TRUSTED_HEADER_UPSTREAM};
+    }
+
+    location /.well-known/ {
+        proxy_pass ${TRUSTED_HEADER_UPSTREAM};
+    }
+
+    # Exposed on purpose: lets a test compare "through the gateway" with "straight to the backend".
+    location /actuator/ {
+        proxy_pass ${TRUSTED_HEADER_UPSTREAM};
+    }
+
+    location = /runtime-config.js {
+        add_header Cache-Control "no-store";
+        try_files $uri =404;
+    }
+
+    location / {
+        add_header Cache-Control "no-cache, must-revalidate" always;
+        try_files $uri $uri/ /index.html;
+    }
+}

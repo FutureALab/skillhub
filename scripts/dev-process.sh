@@ -59,6 +59,36 @@ wait_for_exit() {
   return 1
 }
 
+# Terminates a process and its descendants, deepest first.
+kill_tree() {
+  local pid="$1"
+  local signal="$2"
+  local child
+  if command -v pgrep >/dev/null 2>&1; then
+    for child in $(pgrep -P "$pid" 2>/dev/null || true); do
+      kill_tree "$child" "$signal"
+    done
+  fi
+  kill "-$signal" "$pid" 2>/dev/null || true
+}
+
+# Keeps the previous run's log for diagnosis but never lets a runaway process fill the disk.
+cap_log_file() {
+  local log_file="$1"
+  local max_bytes="${DEV_LOG_MAX_BYTES:-67108864}"
+  [[ "$max_bytes" =~ ^[0-9]+$ ]] || return 0
+  (( max_bytes > 0 )) || return 0
+  [[ -f "$log_file" ]] || return 0
+
+  # BSD wc pads the count with spaces, so strip whitespace before the numeric check.
+  local size
+  size="$(wc -c < "$log_file" 2>/dev/null | tr -d '[:space:]')"
+  [[ "$size" =~ ^[0-9]+$ ]] || return 0
+  if (( size > max_bytes )); then
+    mv -f "$log_file" "${log_file}.1" 2>/dev/null || true
+  fi
+}
+
 cmd="${1:-}"
 [[ -n "$cmd" ]] || usage
 shift || true
@@ -128,9 +158,11 @@ case "$cmd" in
     fi
 
     pid="$(cat "$pid_file")"
-    kill "$pid" 2>/dev/null || true
+    # Wrapper commands (pnpm -> node/vite) can exit before their children, so terminate the whole
+    # tree; otherwise an orphan keeps holding the dev port and the next start fails.
+    kill_tree "$pid" TERM
     if ! wait_for_exit "$pid"; then
-      kill -9 "$pid" 2>/dev/null || true
+      kill_tree "$pid" KILL
       wait_for_exit "$pid" || true
     fi
     rm -f "$pid_file"
@@ -140,6 +172,7 @@ case "$cmd" in
     log_file="$(resolve_path "$log_file")"
     cwd="$(resolve_path "$cwd")"
     mkdir -p "$(dirname "$pid_file")" "$(dirname "$log_file")"
+    cap_log_file "$log_file"
     if is_running "$pid_file"; then
       echo "Process already running with PID $(cat "$pid_file")" >&2
       exit 1

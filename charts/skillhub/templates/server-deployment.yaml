@@ -307,6 +307,11 @@ spec:
                 configMapKeyRef:
                   name: {{ include "skillhub.fullname" . }}-config
                   key: auth-trusted-header-enabled
+            - name: SKILLHUB_AUTH_TRUSTED_HEADER_PER_REQUEST_AUTHENTICATION
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "skillhub.fullname" . }}-config
+                  key: auth-trusted-header-per-request-authentication
             - name: SKILLHUB_AUTH_TRUSTED_HEADER_PROVIDER_CODE
               valueFrom:
                 configMapKeyRef:

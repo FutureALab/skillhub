@@ -60,10 +60,12 @@
             "displayName",
             "userHeader",
             "emailHeader",
-            "sharedSecretHeader"
+            "sharedSecretHeader",
+            "perRequestAuthentication"
           ],
           "properties": {
             "enabled": { "type": "boolean" },
+            "perRequestAuthentication": { "type": "boolean" },
             "providerCode": { "type": "string", "minLength": 1 },
             "displayName": { "type": "string", "minLength": 1 },
             "userHeader": { "type": "string", "minLength": 1 },

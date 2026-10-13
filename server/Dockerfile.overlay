@@ -1,0 +1,20 @@
+# Runs a locally built jar on top of the published SkillHub runtime image.
+#
+# `server/Dockerfile` builds from eclipse-temurin Maven/JDK bases and `server/Dockerfile.dev` uses
+# eclipse-temurin:21-jre-alpine. When those cannot be pulled (offline machine, restricted registry)
+# this overlay reuses an already published runtime image as the JRE base and only swaps in the jar,
+# so a test stack can run the current source without touching the network:
+#
+#   cd server && ./mvnw -pl skillhub-app -am package -DskipTests -B
+#   docker build --pull=false -f Dockerfile.overlay -t skillhub-server:trusted-header-test .
+#
+# The build context is this directory (server/), hence the relative jar path below.
+ARG SERVER_BASE_IMAGE=ghcr.io/futurealab/skillhub-server:v0.2.222
+FROM ${SERVER_BASE_IMAGE}
+
+# The runtime image keeps the jar at /app/app.jar and starts it as the unprivileged `app` user
+# (ENTRYPOINT java -jar app.jar, WORKDIR /app, USER app), which is inherited here unchanged.
+USER root
+COPY skillhub-app/target/*.jar /app/app.jar
+RUN chown app:app /app/app.jar
+USER app

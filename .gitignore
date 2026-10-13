@@ -93,3 +93,4 @@ charts/skillhub/charts/*.tgz
 
 # Local config file
 .mcp.json
+/.pnpm-store

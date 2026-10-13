@@ -163,11 +163,14 @@ skillhub:
       enabled: ${SKILLHUB_AUTH_DIRECT_ENABLED:false}
     session-bootstrap:
       enabled: ${SKILLHUB_AUTH_SESSION_BOOTSTRAP_ENABLED:false}
-    # Trusts identity headers injected by an upstream forward-auth gateway. Enabling it also
-    # requires skillhub.auth.session-bootstrap.enabled=true, because the browser exchanges these
-    # headers for a first-party session through POST /api/v1/auth/session/bootstrap.
+    # Trusts identity headers injected by an upstream forward-auth gateway.
+    # Pull model: enable session-bootstrap and the web entry, then the browser exchanges the
+    # headers once through POST /api/v1/auth/session/bootstrap.
+    # Transparent model: also enable per-request-authentication and every request carrying the
+    # headers signs in automatically, with no login page.
     trusted-header:
       enabled: ${SKILLHUB_AUTH_TRUSTED_HEADER_ENABLED:false}
+      per-request-authentication: ${SKILLHUB_AUTH_TRUSTED_HEADER_PER_REQUEST_AUTHENTICATION:false}
       provider-code: ${SKILLHUB_AUTH_TRUSTED_HEADER_PROVIDER_CODE:forward-auth}
       display-name: ${SKILLHUB_AUTH_TRUSTED_HEADER_DISPLAY_NAME:Enterprise SSO}
       user-header: ${SKILLHUB_AUTH_TRUSTED_HEADER_USER_HEADER:X-Auth-Request-User}

@@ -128,6 +128,8 @@
 以下做法不建议在私有版采用：
 
 - 在全局 servlet filter 中对所有匿名请求自动尝试 SSO 登录
+  （受控例外：开源版内置的 `skillhub.auth.trusted-header.per-request-authentication` 默认关闭，
+  且只信任网关已经注入的标头，不主动重定向、不调用外部校验接口，使用时仍需网络隔离或共享密钥）
 - 直接在 controller、filter 或 provider 里手写 `HttpSession` 和 `SecurityContext` 逻辑
 - 把私有 SSO 的 UID 映射成临时整数 ID 再作为用户主标识
 - 按 email 自动合并账号
