@@ -61,6 +61,7 @@ data:
   auth-session-bootstrap-auto: {{ .Values.auth.sessionBootstrap.auto | quote }}
   auth-trusted-header-enabled: {{ .Values.auth.trustedHeader.enabled | quote }}
   auth-trusted-header-per-request-authentication: {{ .Values.auth.trustedHeader.perRequestAuthentication | quote }}
+  auth-trusted-header-session-override: {{ .Values.auth.trustedHeader.sessionOverride | quote }}
   auth-trusted-header-provider-code: {{ .Values.auth.trustedHeader.providerCode | quote }}
   auth-trusted-header-display-name: {{ .Values.auth.trustedHeader.displayName | quote }}
   auth-trusted-header-user-header: {{ .Values.auth.trustedHeader.userHeader | quote }}

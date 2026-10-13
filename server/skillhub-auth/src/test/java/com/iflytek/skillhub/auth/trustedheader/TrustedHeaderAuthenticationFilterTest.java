@@ -37,8 +37,16 @@ class TrustedHeaderAuthenticationFilterTest {
 
     @BeforeEach
     void setUp() {
-        filter = new TrustedHeaderAuthenticationFilter(resolver, platformSessionService);
+        filter = newFilter(false);
         SecurityContextHolder.clearContext();
+    }
+
+    private TrustedHeaderAuthenticationFilter newFilter(boolean sessionOverride) {
+        TrustedHeaderAuthProperties properties = new TrustedHeaderAuthProperties();
+        properties.setEnabled(true);
+        properties.setPerRequestAuthentication(true);
+        properties.setSessionOverride(sessionOverride);
+        return new TrustedHeaderAuthenticationFilter(resolver, platformSessionService, properties);
     }
 
     @AfterEach
@@ -91,6 +99,37 @@ class TrustedHeaderAuthenticationFilterTest {
         then(platformSessionService).should(never()).establishSession(any(), any(), anyBoolean());
     }
 
+    @Test
+    void sessionOverrideRebindsSessionWhenHeadersAssertAnotherIdentity() throws Exception {
+        filter = newFilter(true);
+        PlatformPrincipal resolved = principal("usr_bob", "bob");
+        given(resolver.resolve(any())).willReturn(Optional.of(resolved));
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.getSession(true);
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken(principal("usr_alice", "alice"), null));
+
+        assertThat(chainCalled(request)).isTrue();
+
+        // false: the session already exists, so its id must not be rotated.
+        then(platformSessionService).should().establishSession(resolved, request, false);
+    }
+
+    @Test
+    void sessionOverrideKeepsSessionWhenHeadersAgree() throws Exception {
+        filter = newFilter(true);
+        PlatformPrincipal sameIdentity = principal("usr_alice", "alice");
+        given(resolver.resolve(any())).willReturn(Optional.of(sameIdentity));
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.getSession(true);
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken(sameIdentity, null));
+
+        chainCalled(request);
+
+        then(platformSessionService).should(never()).establishSession(any(), any(), anyBoolean());
+    }
+
     private boolean chainCalled(MockHttpServletRequest request) throws Exception {
         AtomicBoolean called = new AtomicBoolean(false);
         FilterChain chain = (servletRequest, servletResponse) -> called.set(true);
@@ -99,6 +138,11 @@ class TrustedHeaderAuthenticationFilterTest {
     }
 
     private PlatformPrincipal principal() {
-        return new PlatformPrincipal("alice", "alice", "alice@example.com", null, "forward-auth", Set.of("USER"));
+        return principal("alice", "alice");
+    }
+
+    private PlatformPrincipal principal(String userId, String displayName) {
+        return new PlatformPrincipal(
+                userId, displayName, userId + "@example.com", null, "forward-auth", Set.of("USER"));
     }
 }

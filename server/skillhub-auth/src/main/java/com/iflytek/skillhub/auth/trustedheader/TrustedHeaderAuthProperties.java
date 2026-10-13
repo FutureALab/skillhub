@@ -28,6 +28,24 @@ public class TrustedHeaderAuthProperties {
     private boolean perRequestAuthentication = false;
 
     /**
+     * When enabled, the trusted headers also take precedence over an already
+     * authenticated session: a request whose headers assert a different identity
+     * rebinds the session to that identity instead of being ignored.
+     *
+     * <p>This makes the upstream gateway the single source of truth about who the
+     * caller is, which is what an embedding page that switches users without a
+     * login round trip needs. It also means the gateway must overwrite the
+     * configured headers (and any cookie they are derived from) on every request,
+     * because a client that can set them can switch accounts at will. A session
+     * established this way cannot be ended by logging out while the gateway keeps
+     * asserting the same identity.
+     *
+     * <p>Disabled by default. Requires {@link #perRequestAuthentication}, otherwise
+     * there is no filter to apply it.
+     */
+    private boolean sessionOverride = false;
+
+    /**
      * External provider code recorded on the identity binding. Keep it stable
      * once accounts exist, because changing it creates a new identity
      * coordinate.
@@ -80,10 +98,17 @@ public class TrustedHeaderAuthProperties {
         this.perRequestAuthentication = perRequestAuthentication;
     }
 
+    public boolean isSessionOverride() {
+        return sessionOverride;
+    }
+
+    public void setSessionOverride(boolean sessionOverride) {
+        this.sessionOverride = sessionOverride;
+    }
+
     public String getProviderCode() {
         return providerCode;
     }
-
     public void setProviderCode(String providerCode) {
         this.providerCode = providerCode;
     }

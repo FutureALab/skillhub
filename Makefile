@@ -1,4 +1,4 @@
-.PHONY: build build-backend build-backend-app build-builtin-skills build-cli build-frontend build-web check clean cli-install db-reset dev dev-all dev-all-down dev-all-reset dev-db-check dev-db-repair dev-down dev-logs dev-scanner dev-server dev-server-env dev-server-restart dev-status dev-web docs-build docs-dev docs-preview generate-api help lint-cli lint-web namespace-smoke suite-smoke suite-bundle-smoke parallel-down parallel-init parallel-sync parallel-up pr publish-cli publish-cli-major publish-cli-minor staging staging-down staging-logs test test-backend test-backend-app test-builtin-skills test-cli test-e2e-frontend test-e2e-smoke-frontend test-frontend test-redis-cluster test-web trusted-header-build trusted-header-smoke trusted-header-test trusted-header-test-down trusted-header-test-reset typecheck-cli typecheck-web validate-release-config web-deps web-install web-install-ci
+.PHONY: build build-backend build-backend-app build-builtin-skills build-cli build-frontend build-web check clean cli-install db-reset dev dev-all dev-all-down dev-all-reset dev-db-check dev-db-repair dev-down dev-logs dev-scanner dev-server dev-server-env dev-server-restart dev-status dev-web docs-build docs-dev docs-preview generate-api help lint-cli lint-web namespace-smoke suite-smoke suite-bundle-smoke parallel-down parallel-init parallel-sync parallel-up pr publish-cli publish-cli-major publish-cli-minor staging staging-down staging-logs test test-backend test-backend-app test-builtin-skills test-cli test-e2e-frontend test-e2e-smoke-frontend test-frontend test-redis-cluster test-web trusted-header-smoke trusted-header-test trusted-header-test-down trusted-header-test-reset typecheck-cli typecheck-web validate-release-config web-deps web-install web-install-ci
 
 DEV_DIR := .dev
 DEV_SERVER_PID := $(DEV_DIR)/server.pid
@@ -47,8 +47,9 @@ TRUSTED_HEADER_TEST_USER ?= gateway-user-1
 TRUSTED_HEADER_TEST_EMAIL ?= gateway-user-1@example.com
 # `${VAR-default}` semantics: pass TRUSTED_HEADER_TEST_SECRET= to disable the shared-secret check.
 TRUSTED_HEADER_TEST_SECRET ?= trusted-header-test-secret
-TRUSTED_HEADER_SERVER_IMAGE ?= skillhub-server:trusted-header-test
-TRUSTED_HEADER_SERVER_BASE_IMAGE ?= ghcr.io/futurealab/skillhub-server:v0.2.222
+# Published release images; the stack is not built from source.
+TRUSTED_HEADER_SERVER_IMAGE ?= ghcr.io/futurealab/skillhub-server:v0.2.224
+TRUSTED_HEADER_GATEWAY_IMAGE ?= ghcr.io/futurealab/skillhub-web:v0.2.224
 BACKEND_TEST_JAVA_OPTIONS ?= -XX:+EnableDynamicAgentLoading
 PARALLEL_BASE_REF ?= origin/main
 PARALLEL_WORKTREE_ROOT ?=
@@ -289,16 +290,9 @@ dev-status: ## 查看本地开发服务状态
 
 # --- trusted-header test stack: nginx injects the identity headers on every backend request -----
 
-trusted-header-build: ## 构建标头认证测试镜像（当前源码 jar 叠加到已发布运行时镜像）
-	cd server && ./mvnw -pl skillhub-app -am package -DskipTests -B -q
-	cd server && docker build --pull=false \
-		-f Dockerfile.overlay \
-		--build-arg SERVER_BASE_IMAGE=$(TRUSTED_HEADER_SERVER_BASE_IMAGE) \
-		-t $(TRUSTED_HEADER_SERVER_IMAGE) .
-
 trusted-header-test: ## 启动标头认证测试栈（postgres/redis/后端/nginx 网关）并运行断言
-	@$(MAKE) --no-print-directory trusted-header-build
 	@TRUSTED_HEADER_SERVER_IMAGE=$(TRUSTED_HEADER_SERVER_IMAGE) \
+	 TRUSTED_HEADER_GATEWAY_IMAGE=$(TRUSTED_HEADER_GATEWAY_IMAGE) \
 	 TRUSTED_HEADER_TEST_USER=$(TRUSTED_HEADER_TEST_USER) \
 	 TRUSTED_HEADER_TEST_EMAIL=$(TRUSTED_HEADER_TEST_EMAIL) \
 	 TRUSTED_HEADER_TEST_SECRET=$(TRUSTED_HEADER_TEST_SECRET) \

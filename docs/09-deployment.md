@@ -339,6 +339,7 @@ services:
 |------|--------|------|
 | `SKILLHUB_AUTH_TRUSTED_HEADER_ENABLED` | `false` | 是否信任网关注入的身份标头（模式总开关） |
 | `SKILLHUB_AUTH_TRUSTED_HEADER_PER_REQUEST_AUTHENTICATION` | `false` | 透明模式：每请求自动登录，需要上面的开关同时为 `true` |
+| `SKILLHUB_AUTH_TRUSTED_HEADER_SESSION_OVERRIDE` | `false` | 透明模式下让标头**覆盖已有会话**：网关断言的身份与当前会话不一致时会话改绑到新身份。用于嵌入页（iframe）在同一浏览器里切换用户。开启后网关必须是身份的唯一来源（覆写标头），且登出不会生效——网关会持续断言身份并把账号重新登录 |
 | `SKILLHUB_AUTH_SESSION_BOOTSTRAP_ENABLED` | 拉模型必开 | 拉模型下必须为 `true`，否则 bootstrap 接口返回 `403`；透明模式不需要 |
 | `SKILLHUB_AUTH_TRUSTED_HEADER_PROVIDER_CODE` | `forward-auth` | 写入 `identity_binding.provider_code`，启用后不要修改 |
 | `SKILLHUB_AUTH_TRUSTED_HEADER_DISPLAY_NAME` | `Enterprise SSO` | 登录页展示名称（仅拉模型使用） |
@@ -358,6 +359,42 @@ services:
   Session，**透明模式下用户无法有效登出**（只要网关继续注入标头，下一个请求就会重新登录），
   需要登出能力时必须依赖网关侧的登出并停止注入标头
 - 透明模式会为每个"带标头且无会话"的请求创建一个 Session；纯 API 客户端应改用 API Token
+
+##### 手工在请求头里携带标头
+
+后端就是从**请求头**读取身份的，所以客户端可以直接携带，不需要网关：
+
+```bash
+# 直连后端（compose 里 server 未映射端口时可先临时映射，或从容器内执行）
+curl -i -H 'X-Auth-Request-User: 5551822294' \
+        -H 'X-Forwarded-Email: 5551822294@mails.icbc' \
+        http://localhost:8080/api/v1/auth/me
+
+# 经过 web 容器（nginx）访问：仓库自带的 nginx 只覆盖 Host / X-Real-IP /
+# X-Forwarded-* 几个标头，其它客户端标头会原样透传，因此同样可用
+curl -i -H 'X-Auth-Request-User: 5551822294' \
+        -H 'X-Forwarded-Email: 5551822294@mails.icbc' \
+        http://your-domain-or-ip/api/v1/auth/me
+```
+
+前置条件与注意事项：
+
+- `SKILLHUB_AUTH_TRUSTED_HEADER_ENABLED=true`；想要"每个请求自动登录"还要
+  `SKILLHUB_AUTH_TRUSTED_HEADER_PER_REQUEST_AUTHENTICATION=true`
+- 若配置了 `SKILLHUB_AUTH_TRUSTED_HEADER_SHARED_SECRET`，请求必须同时带上
+  `SKILLHUB_AUTH_TRUSTED_HEADER_SHARED_SECRET_HEADER`（默认 `X-Skillhub-Proxy-Secret`）
+  且值一致，否则返回 `401`；只做本地/内网手工验证时可以把 secret 留空
+- 标头名可用 `SKILLHUB_AUTH_TRUSTED_HEADER_USER_HEADER` /
+  `..._EMAIL_HEADER` 改成你们网关实际使用的名字
+- **如果前面还有一层会 `proxy_set_header` 的网关，客户端传的值会被网关覆盖**（这正是防止
+  伪造身份的设计）。这种情况下要么直连后端，要么让网关做透传/取值映射；仓库自带的 web
+  nginx 不做覆盖，所以可以直接携带
+- `compose.icbc.yml` 与 `compose.release.yml` 都已把这些开关做成环境变量
+  （默认关闭），例如：
+  `SKILLHUB_AUTH_TRUSTED_HEADER_ENABLED=true SKILLHUB_AUTH_TRUSTED_HEADER_PER_REQUEST_AUTHENTICATION=true docker compose -f compose.icbc.yml up -d server`
+
+想直接看效果又不想改部署，可以用测试栈：`make trusted-header-test`（nginx 注入标头，
+自带 8 条断言），并可用 `X-Test-User` 逐请求切换身份。
 
 开发环境：
 

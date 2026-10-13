@@ -9,6 +9,9 @@
 #
 # Overridable identity/secret (must match the compose environment):
 #   TRUSTED_HEADER_TEST_USER, TRUSTED_HEADER_TEST_EMAIL, TRUSTED_HEADER_TEST_SECRET
+#
+# The gateway also honours the `skillhub_name` / `skillhub_email` cookies, which is how an embedding
+# page (iframe) supplies the identity; a non-empty cookie wins over X-Test-* and the fixed default.
 set -euo pipefail
 
 GATEWAY_URL="${1:-http://localhost:8081}"
@@ -18,6 +21,8 @@ TEST_EMAIL="${TRUSTED_HEADER_TEST_EMAIL:-gateway-user-1@example.com}"
 TEST_SECRET="${TRUSTED_HEADER_TEST_SECRET-trusted-header-test-secret}"
 OVERRIDE_USER="trusted-header-override-$$"
 OVERRIDE_EMAIL="${OVERRIDE_USER}@example.com"
+COOKIE_USER="trusted-header-cookie-$$"
+COOKIE_EMAIL="${COOKIE_USER}@example.com"
 
 PASS=0
 FAIL=0
@@ -104,7 +109,20 @@ expect_identity "gateway honours X-Test-User override (JIT account)" "$OVERRIDE_
   "forward-auth" "$GATEWAY_URL/api/v1/auth/me" \
   -H "X-Test-User: $OVERRIDE_USER" -H "X-Test-Email: $OVERRIDE_EMAIL"
 
-# 3. The browser entry point is served by the same gateway.
+# 3. The skillhub_name / skillhub_email cookies carry the identity for an embedding page: the gateway
+#    maps them onto the trusted headers, so the backend still never reads a cookie itself.
+expect_identity "gateway maps skillhub_name / skillhub_email cookies (JIT account)" \
+  "$COOKIE_USER" "$COOKIE_EMAIL" "forward-auth" "$GATEWAY_URL/api/v1/auth/me" \
+  -H "Cookie: skillhub_name=$COOKIE_USER; skillhub_email=$COOKIE_EMAIL"
+
+# 4. A non-empty cookie takes precedence over both X-Test-* and the fixed default identity, so an
+#    embedding page can pin the user without disabling the test overrides for everything else.
+expect_identity "cookie wins over X-Test-User override" "$COOKIE_USER" "$COOKIE_EMAIL" "forward-auth" \
+  "$GATEWAY_URL/api/v1/auth/me" \
+  -H "Cookie: skillhub_name=$COOKIE_USER; skillhub_email=$COOKIE_EMAIL" \
+  -H "X-Test-User: $OVERRIDE_USER" -H "X-Test-Email: $OVERRIDE_EMAIL"
+
+# 5. The browser entry point is served by the same gateway.
 request "$GATEWAY_URL/"
 if [[ "$HTTP_STATUS" == "200" ]]; then
   pass "gateway serves the SPA (HTTP 200)"
@@ -112,11 +130,11 @@ else
   fail "gateway serves the SPA (expected HTTP 200, got ${HTTP_STATUS:-none})"
 fi
 
-# 4. Bypassing the gateway must not authenticate: the backend is only reachable with the headers.
+# 6. Bypassing the gateway must not authenticate: the backend is only reachable with the headers.
 expect_status "direct request without headers is rejected" "401" "$DIRECT_URL/api/v1/auth/me"
 
 if [[ -n "$TEST_SECRET" ]]; then
-  # 5. With the gateway shared secret the backend accepts the assertions directly. Note that this is
+  # 7. With the gateway shared secret the backend accepts the assertions directly. Note that this is
   #    the *only* thing standing between a caller and impersonation on the direct path: the
   #    deployment must still keep the backend unreachable except through the gateway.
   expect_identity "direct request with the shared secret is accepted" "$TEST_USER" "$TEST_EMAIL" \
@@ -125,7 +143,7 @@ if [[ -n "$TEST_SECRET" ]]; then
     -H "X-Forwarded-Email: $TEST_EMAIL" \
     -H "X-Skillhub-Proxy-Secret: $TEST_SECRET"
 
-  # 6. Missing / 7. wrong secret are both rejected.
+  # 8. Missing / 9. wrong secret are both rejected.
   expect_status "direct request with headers but no secret is rejected" "401" "$DIRECT_URL/api/v1/auth/me" \
     -H "X-Auth-Request-User: $TEST_USER" \
     -H "X-Forwarded-Email: $TEST_EMAIL"
@@ -137,7 +155,7 @@ else
   skip "shared-secret assertions (TRUSTED_HEADER_TEST_SECRET is empty)"
 fi
 
-# 8. Gateway health.
+# 10. Gateway health.
 expect_status "gateway health endpoint" "200" "$GATEWAY_URL/nginx-health"
 
 echo

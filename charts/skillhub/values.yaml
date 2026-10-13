@@ -37,6 +37,9 @@ auth:
     enabled: false
     # true：每个带标头的请求自动登录，完全不经登录页（Open WebUI 式透明模式）
     perRequestAuthentication: false
+    # true：标头身份可覆盖已有会话（嵌入页在同一浏览器里切换用户）。
+    # 开启后网关必须是身份的唯一来源，且登出不会生效——网关会持续断言身份。
+    sessionOverride: false
     providerCode: forward-auth
     displayName: Enterprise SSO
     userHeader: X-Auth-Request-User

@@ -69,7 +69,7 @@ on every forwarded request**, which is what a forward-auth gateway (oauth2-proxy
 Authentik, nginx `auth_request`) does in production.
 
 ```bash
-make trusted-header-test        # build the current source + start the stack + run assertions
+make trusted-header-test        # start the published release images + run assertions
 make trusted-header-smoke       # re-run the assertions only
 make trusted-header-test-down   # stop
 make trusted-header-test-reset  # stop and drop its volumes
@@ -84,21 +84,38 @@ Endpoints:
 
 What the stack does:
 
-- Backend runs with `SKILLHUB_AUTH_TRUSTED_HEADER_ENABLED=true` and
-  `SKILLHUB_AUTH_TRUSTED_HEADER_PER_REQUEST_AUTHENTICATION=true`, so every request carrying the
-  headers is signed in (no login page, no bootstrap call).
+- Backend runs with `SKILLHUB_AUTH_TRUSTED_HEADER_ENABLED=true`,
+  `SKILLHUB_AUTH_TRUSTED_HEADER_PER_REQUEST_AUTHENTICATION=true` and
+  `SKILLHUB_AUTH_TRUSTED_HEADER_SESSION_OVERRIDE=true`, so every request carrying the headers is
+  signed in (no login page, no bootstrap call) and those headers also replace an existing session.
 - The gateway injects `X-Auth-Request-User`, `X-Forwarded-Email` and `X-Skillhub-Proxy-Secret`.
 - `X-Test-User` / `X-Test-Email` on a request override the injected identity, which makes it easy to
   switch users (each new one is provisioned on first sight):
   `curl -H 'X-Test-User: alice' http://localhost:8081/api/v1/auth/me`
+- The `skillhub_name` / `skillhub_email` cookies are mapped by the gateway onto the same trusted
+  headers, which is how an embedding page (iframe) supplies the identity. A non-empty cookie wins
+  over `X-Test-*` and over the fixed default:
+  `curl -H 'Cookie: skillhub_name=alice; skillhub_email=alice@corp.example' http://localhost:8081/api/v1/auth/me`
+  The backend still reads identity from headers only and never from a cookie. Two constraints come
+  with this: `X-Auth-Request-User` doubles as the account binding key, so `skillhub_name` must stay
+  stable for a given person — changing it provisions a new account instead of renaming the existing
+  one; and the value must be **ASCII**, because nginx rejects non-ASCII header values (a browser
+  sending a raw UTF-8 cookie gets `400`, and percent-encoding it with `encodeURIComponent` reaches
+  the backend as the literal `%E5%BC%A0%E4%B8%89`). Use an ASCII login/employee id such as
+  `zhangsan`, not a display name like `张三`.
+- Without `SESSION_OVERRIDE` an existing session always wins: a browser that is already signed in
+  keeps its identity even when the gateway asserts another one (this is why a hand-set cookie
+  appears to be ignored while a `SESSION` cookie is present). With it enabled the headers win, so a
+  cookie switches the user of a live session. Logging out does not stick in that mode — the gateway
+  keeps asserting an identity, so the account is signed back in on the next request.
 - The assertions also cover the negative paths: a direct request without headers, and one with a
   missing or wrong shared secret, must both return `401`.
 
 Values can be overridden at invocation time, e.g.
 `make trusted-header-test TRUSTED_HEADER_TEST_USER=alice TRUSTED_HEADER_TEST_EMAIL=alice@corp.example`,
 or `TRUSTED_HEADER_TEST_SECRET=` to run without the shared secret (the secret assertions are then
-skipped). `TRUSTED_HEADER_SERVER_BASE_IMAGE` selects the runtime image the locally built jar is
-layered onto.
+skipped). `TRUSTED_HEADER_SERVER_IMAGE` and `TRUSTED_HEADER_GATEWAY_IMAGE` select which published
+release images the stack runs; nothing is built from source.
 
 > **Test-only:** the `X-Test-User` override is an impersonation backdoor by design. Never copy
 > `docker/trusted-header/*.conf.template` into a real gateway, where the identity must come from the

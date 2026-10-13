@@ -7,12 +7,16 @@
 # skillhub.auth.trusted-header.enabled=true and per-request-authentication=true, so the first
 # request through the gateway signs the user in without any login page.
 #
-# Usage (recommended — also builds the current source and runs the assertions):
-#   make trusted-header-test          # build + up + smoke test
+# Both application images are the published v0.2.224 artifacts — nothing is built from source, so
+# the stack starts exactly what a release ships. Override the tags with TRUSTED_HEADER_SERVER_IMAGE /
+# TRUSTED_HEADER_GATEWAY_IMAGE if you want to test a different release.
+#
+# Usage:
+#   make trusted-header-test          # up + smoke test
 #   make trusted-header-smoke         # re-run the assertions
 #   make trusted-header-test-down     # stop and remove
 #
-# Or directly (the image must already be built):
+# Or directly (the images must be present locally or pullable):
 #   docker compose -p skillhub-th -f docker-compose.trusted-header.yml up -d --wait
 #
 # Endpoints:
@@ -48,13 +52,7 @@ services:
       retries: 10
 
   server:
-    image: ${TRUSTED_HEADER_SERVER_IMAGE:-skillhub-server:trusted-header-test}
-    build:
-      context: ./server
-      dockerfile: Dockerfile.overlay
-      args:
-        # Reuses the already published runtime image as the JRE base so no registry access is needed.
-        SERVER_BASE_IMAGE: ${TRUSTED_HEADER_SERVER_BASE_IMAGE:-ghcr.io/futurealab/skillhub-server:v0.2.222}
+    image: ${TRUSTED_HEADER_SERVER_IMAGE:-ghcr.io/futurealab/skillhub-server:v0.2.224}
     ports:
       # Published on purpose: the smoke test uses it to prove that a direct request without valid
       # gateway headers is rejected.
@@ -84,6 +82,9 @@ services:
       SKILLHUB_AUTH_TRUSTED_HEADER_ENABLED: "true"
       # Every request carrying the headers authenticates itself; no login page, no bootstrap call.
       SKILLHUB_AUTH_TRUSTED_HEADER_PER_REQUEST_AUTHENTICATION: "true"
+      # The headers also replace an already authenticated session, so an embedding page can switch
+      # the identity with its cookie even when the browser still holds an older SESSION cookie.
+      SKILLHUB_AUTH_TRUSTED_HEADER_SESSION_OVERRIDE: "true"
       SKILLHUB_AUTH_TRUSTED_HEADER_PROVIDER_CODE: forward-auth
       SKILLHUB_AUTH_TRUSTED_HEADER_DISPLAY_NAME: Test Gateway
       SKILLHUB_AUTH_TRUSTED_HEADER_USER_HEADER: X-Auth-Request-User
@@ -107,7 +108,7 @@ services:
       start_period: 120s
 
   gateway:
-    image: ${TRUSTED_HEADER_GATEWAY_IMAGE:-ghcr.io/futurealab/skillhub-web:v0.2.222}
+    image: ${TRUSTED_HEADER_GATEWAY_IMAGE:-ghcr.io/futurealab/skillhub-web:v0.2.224}
     ports:
       - "127.0.0.1:8081:80"
     environment:

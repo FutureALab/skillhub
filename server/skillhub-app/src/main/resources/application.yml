@@ -168,9 +168,12 @@ skillhub:
     # headers once through POST /api/v1/auth/session/bootstrap.
     # Transparent model: also enable per-request-authentication and every request carrying the
     # headers signs in automatically, with no login page.
+    # session-override additionally lets those headers replace an already authenticated session, so
+    # the gateway decides the identity even when the browser still holds an older session cookie.
     trusted-header:
       enabled: ${SKILLHUB_AUTH_TRUSTED_HEADER_ENABLED:false}
       per-request-authentication: ${SKILLHUB_AUTH_TRUSTED_HEADER_PER_REQUEST_AUTHENTICATION:false}
+      session-override: ${SKILLHUB_AUTH_TRUSTED_HEADER_SESSION_OVERRIDE:false}
       provider-code: ${SKILLHUB_AUTH_TRUSTED_HEADER_PROVIDER_CODE:forward-auth}
       display-name: ${SKILLHUB_AUTH_TRUSTED_HEADER_DISPLAY_NAME:Enterprise SSO}
       user-header: ${SKILLHUB_AUTH_TRUSTED_HEADER_USER_HEADER:X-Auth-Request-User}

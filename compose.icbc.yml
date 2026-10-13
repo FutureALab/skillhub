@@ -175,6 +175,28 @@ services:
       # 与 SPRING_SECURITY_OAUTH2_CLIENT_PROVIDER_<ID>_ISSUER_URI，详见 docs/11-auth-extensibility-and-private-sso.md
       SKILLHUB_AUTH_DIRECT_ENABLED: "false"
 
+      # ==================== 信任标头认证（forward-auth 网关 / 手工带标头） ====================
+      # 网关（客户 SSO 门户 / oauth2-proxy 等）完成认证后注入身份标头，后端据此登录。
+      # 透明模式（PER_REQUEST_AUTHENTICATION=true）：每个带标头的请求自动登录，不经过登录页。
+      # 所有开关都可用环境变量覆盖，无需改本文件，例如：
+      #   SKILLHUB_AUTH_TRUSTED_HEADER_ENABLED=true \
+      #   SKILLHUB_AUTH_TRUSTED_HEADER_PER_REQUEST_AUTHENTICATION=true \
+      #   docker compose -f compose.icbc.yml up -d server
+      # 手工验证时可自己在请求头里携带（经 web 的 nginx 会原样透传，见 docs/09-deployment.md）：
+      #   curl -H 'X-Auth-Request-User: 5551822294' \
+      #        -H 'X-Forwarded-Email: 5551822294@mails.icbc' \
+      #        http://your-domain-or-ip/api/v1/auth/me
+      SKILLHUB_AUTH_TRUSTED_HEADER_ENABLED: ${SKILLHUB_AUTH_TRUSTED_HEADER_ENABLED:-false}
+      SKILLHUB_AUTH_TRUSTED_HEADER_PER_REQUEST_AUTHENTICATION: ${SKILLHUB_AUTH_TRUSTED_HEADER_PER_REQUEST_AUTHENTICATION:-false}
+      SKILLHUB_AUTH_TRUSTED_HEADER_PROVIDER_CODE: ${SKILLHUB_AUTH_TRUSTED_HEADER_PROVIDER_CODE:-forward-auth}
+      SKILLHUB_AUTH_TRUSTED_HEADER_DISPLAY_NAME: ${SKILLHUB_AUTH_TRUSTED_HEADER_DISPLAY_NAME:-Enterprise SSO}
+      SKILLHUB_AUTH_TRUSTED_HEADER_USER_HEADER: ${SKILLHUB_AUTH_TRUSTED_HEADER_USER_HEADER:-X-Auth-Request-User}
+      SKILLHUB_AUTH_TRUSTED_HEADER_EMAIL_HEADER: ${SKILLHUB_AUTH_TRUSTED_HEADER_EMAIL_HEADER:-X-Forwarded-Email}
+      SKILLHUB_AUTH_TRUSTED_HEADER_SHARED_SECRET_HEADER: ${SKILLHUB_AUTH_TRUSTED_HEADER_SHARED_SECRET_HEADER:-X-Skillhub-Proxy-Secret}
+      # 留空 = 不校验标头来源，只靠网络隔离；一旦填写，请求必须同时带该标头，否则 401。
+      # 手工带标头测试时留空最省事；生产建议填写并把 secret 交给网关。
+      SKILLHUB_AUTH_TRUSTED_HEADER_SHARED_SECRET: ${SKILLHUB_AUTH_TRUSTED_HEADER_SHARED_SECRET:-}
+
       # ==================== 可观测性 ====================
       SKILLHUB_TRACING_MODE: none
       SKILLHUB_LOG_FORMAT: json

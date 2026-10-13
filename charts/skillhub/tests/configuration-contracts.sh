@@ -128,6 +128,18 @@ grep -Fq 'auth-session-bootstrap-enabled: "false"' "$TMP_DIR/trusted-header-per-
 grep -Fq 'name: SKILLHUB_AUTH_TRUSTED_HEADER_PER_REQUEST_AUTHENTICATION' "$TMP_DIR/trusted-header-per-request.yaml" \
   || fail "server deployment must inject the trusted-header per-request switch"
 
+render trusted-header-session-override "$CHART_DIR" "${stable_args[@]}" \
+  --set auth.trustedHeader.enabled=true \
+  --set auth.trustedHeader.perRequestAuthentication=true \
+  --set auth.trustedHeader.sessionOverride=true \
+  >"$TMP_DIR/trusted-header-session-override.yaml"
+grep -Fq 'auth-trusted-header-session-override: "true"' "$TMP_DIR/trusted-header-session-override.yaml" \
+  || fail "Helm must render the trusted-header session-override switch"
+grep -Fq 'name: SKILLHUB_AUTH_TRUSTED_HEADER_SESSION_OVERRIDE' "$TMP_DIR/trusted-header-session-override.yaml" \
+  || fail "server deployment must inject the trusted-header session-override switch"
+grep -Fq 'key: auth-trusted-header-session-override' "$TMP_DIR/trusted-header-session-override.yaml" \
+  || fail "server deployment must read the session-override switch from the config map"
+
 render private-registry "$CHART_DIR" \
   --set server.dependencyWait.image.registry=registry.example.com \
   --set server.dependencyWait.image.repository=library/busybox \

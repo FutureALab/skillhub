@@ -1,20 +1,44 @@
 # Trusted-header test gateway: http-level proxy defaults.
 #
 # TEST ONLY — DO NOT COPY INTO A REAL DEPLOYMENT.
-# `X-Test-User` / `X-Test-Email` let any caller impersonate any identity. That is what makes this
-# stack useful for exercising skillhub.auth.trusted-header.*, and it is exactly what a production
-# gateway must never do: a real forward-auth gateway (oauth2-proxy, Authelia, Authentik, nginx
-# auth_request ...) derives the identity from the authenticated session and overwrites these
-# headers on every request.
+# `X-Test-User` / `X-Test-Email` and the `skillhub_name` / `skillhub_email` cookies let any caller
+# impersonate any identity. That is what makes this stack useful for exercising
+# skillhub.auth.trusted-header.*, and it is exactly what a production gateway must never do: a real
+# forward-auth gateway (oauth2-proxy, Authelia, Authentik, nginx auth_request ...) derives the
+# identity from the authenticated session and overwrites these headers on every request.
+#
+# Identity source precedence, highest first:
+#   1. the `skillhub_name` / `skillhub_email` cookies  — what an embedding page (iframe) sets
+#   2. the `X-Test-User` / `X-Test-Email` request headers — what the smoke test uses
+#   3. the fixed TRUSTED_HEADER_TEST_USER / _EMAIL identity
+# Whatever wins is published as the trusted headers below, so the backend keeps reading identity
+# from headers only and never from cookies.
+#
+# NOTE: nginx does not interpolate variables inside `map` match keys, so each layer below is a
+# separate map and the lower layers are referenced from the fallback *value* instead. Do not
+# "simplify" these into a single map that compares against another map's variable.
 
-map $http_x_test_user $skillhub_trusted_user {
+# Layer 2 and 3: an explicit X-Test-* override, otherwise the fixed test identity.
+map $http_x_test_user $skillhub_test_user {
     default "${TRUSTED_HEADER_TEST_USER}";
     "~."    $http_x_test_user;
 }
 
-map $http_x_test_email $skillhub_trusted_email {
+map $http_x_test_email $skillhub_test_email {
     default "${TRUSTED_HEADER_TEST_EMAIL}";
     "~."    $http_x_test_email;
+}
+
+# Layer 1 supersedes layers 2 and 3: a non-empty cookie wins. The empty-string entry is what makes
+# an absent or empty `skillhub_name` cookie fall through to the lower layers.
+map $cookie_skillhub_name $skillhub_trusted_user {
+    ""      $skillhub_test_user;
+    default $cookie_skillhub_name;
+}
+
+map $cookie_skillhub_email $skillhub_trusted_email {
+    ""      $skillhub_test_email;
+    default $cookie_skillhub_email;
 }
 
 # The locations in default.conf.template deliberately declare no proxy_set_header of their own so
@@ -26,6 +50,10 @@ proxy_set_header X-Forwarded-Proto $scheme;
 proxy_set_header X-Forwarded-Prefix "";
 
 # The trusted identity headers consumed by skillhub.auth.trusted-header.*
+#
+# X-Auth-Request-User is both the identity binding subject and the login name, so the account is
+# looked up by this exact value: keep `skillhub_name` stable, because changing it provisions a new
+# account instead of updating the existing one.
 proxy_set_header X-Auth-Request-User     $skillhub_trusted_user;
 proxy_set_header X-Forwarded-Email       $skillhub_trusted_email;
 proxy_set_header X-Skillhub-Proxy-Secret "${TRUSTED_HEADER_TEST_SECRET}";
