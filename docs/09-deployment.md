@@ -239,8 +239,11 @@ docker compose --env-file .env.release -f compose.release.yml up -d --force-recr
 
 Release 附件：
 
-- `skillhub-<component>-<version>-linux-<arch>.tar.gz`（`docker save` 导出的镜像）
-- 每个归档对应的 `.sha256`
+- `skillhub-images-<version>-linux-<arch>.tar.gz`
+  - 每个架构**一个**压缩包，内含该架构下的全部镜像
+  - `amd64` / `arm64`：server + web + scanner；`riscv64`：server + web（scanner 不提供 riscv64）
+  - 由一次 `docker save` 导出，因此目标机器只需执行一条 `docker load` 即可还原所有镜像
+- 每个压缩包对应的 `.sha256`
 - `skillhub-images-<version>-SHA256SUMS`（汇总校验和）
 - `skillhub-images-<version>-HOW-TO-LOAD.md`（加载说明）
 
@@ -248,13 +251,17 @@ Release 附件：
 
 ```bash
 sha256sum -c skillhub-images-<version>-SHA256SUMS
-docker load -i skillhub-server-<version>-linux-amd64.tar.gz
-docker load -i skillhub-web-<version>-linux-amd64.tar.gz
-docker load -i skillhub-scanner-<version>-linux-amd64.tar.gz
+# 一次还原 server / web / scanner（riscv64 包中为 server + web）
+docker load -i skillhub-images-<version>-linux-amd64.tar.gz
+docker images --filter 'reference=ghcr.io/*/skillhub-*'
 ```
 
 加载后的镜像保留 `ghcr.io/<owner>/skillhub-*` 仓库名，可直接配合
 `compose.release.yml` 使用，无需修改 `SKILLHUB_SERVER_IMAGE` 等变量。
+
+说明：工作流内部仍然按"每个镜像 × 每个架构"并行构建，并临时把单镜像包上传到 Release 作为
+中间产物；`bundle` 作业合并成每架构一个压缩包后会删除这些中间产物，因此 Release 上最终
+只保留合并包（以及校验和与说明文件）。
 
 ## 7 配置管理
 

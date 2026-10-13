@@ -1,13 +1,20 @@
 name: Release Docker Images
 
-# Build the SkillHub service images from the released source and attach
-# `docker save` archives to the GitHub Release. Operators on isolated hosts that
-# cannot reach a container registry can download the archives and `docker load`
-# them directly.
+# Build the SkillHub service images from the released source and attach ONE
+# `docker save` archive per architecture to the GitHub Release.
 #
-# Each matrix job uploads its own archive straight to the Release instead of
-# round-tripping multi-hundred-megabyte tarballs through workflow artifacts,
-# which avoids the artifact service's size and transfer limits.
+# Each archive contains every SkillHub image built for that architecture
+# (server, web and scanner), so operators on hosts that cannot reach a container
+# registry download a single file and restore all images with a single
+# `docker load -i`.
+#
+# The heavy builds still run in parallel, one job per image and architecture, and
+# publish their archives to the Release as intermediates. The `bundle` job then
+# downloads the archives of its architecture, loads them, re-exports them as one
+# archive, and finally removes the intermediates again so the Release only offers
+# the merged archives. Routing the intermediates through the Release instead of
+# workflow artifacts avoids the artifact service's size and transfer limits for
+# multi-hundred-megabyte tarballs.
 on:
   release:
     types: [published]
@@ -43,6 +50,7 @@ jobs:
       tag: ${{ steps.meta.outputs.tag }}
       version: ${{ steps.meta.outputs.version }}
       matrix: ${{ steps.meta.outputs.matrix }}
+      bundle_matrix: ${{ steps.meta.outputs.bundle_matrix }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -75,7 +83,7 @@ jobs:
           echo "tag=${TAG}" >> "${GITHUB_OUTPUT}"
           echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
 
-          MATRIX="$(python3 - <<'PY'
+          MATRICES="$(python3 - <<'PY'
           import json
           import os
 
@@ -114,35 +122,55 @@ jobs:
           if unknown:
               raise SystemExit(f"Unsupported architecture(s): {', '.join(unknown)}. Supported: {', '.join(sorted(supported))}")
 
-          entries = []
-          for component in components:
-              for arch in component["architectures"]:
-                  if requested and arch not in requested:
-                      continue
-                  entries.append({
-                      "name": component["name"],
-                      "image": component["image"],
-                      "context": component["context"],
-                      "dockerfile": component["dockerfile"],
-                      "arch": arch,
-                  })
+          def selected(component, arch):
+              return arch in component["architectures"] and (not requested or arch in requested)
 
-          if not entries:
+          packages = [
+              {
+                  "name": component["name"],
+                  "image": component["image"],
+                  "context": component["context"],
+                  "dockerfile": component["dockerfile"],
+                  "arch": arch,
+              }
+              for component in components
+              for arch in component["architectures"]
+              if selected(component, arch)
+          ]
+
+          # One bundle per architecture, holding every image built for it.
+          bundles = [
+              {
+                  "arch": arch,
+                  "components": [
+                      component["name"] for component in components if selected(component, arch)
+                  ],
+              }
+              for arch in ("amd64", "arm64", "riscv64")
+              if any(selected(component, arch) for component in components)
+          ]
+
+          if not packages:
               raise SystemExit("No images selected; check the architectures input.")
 
-          print(json.dumps({"include": entries}))
+          print(json.dumps({"packages": {"include": packages}, "bundles": {"include": bundles}}))
           PY
           )"
 
           {
             echo "matrix<<EOF"
-            echo "${MATRIX}"
+            echo "${MATRICES}" | python3 -c 'import json,sys; print(json.dumps(json.load(sys.stdin)["packages"]))'
+            echo "EOF"
+            echo "bundle_matrix<<EOF"
+            echo "${MATRICES}" | python3 -c 'import json,sys; print(json.dumps(json.load(sys.stdin)["bundles"]))'
             echo "EOF"
           } >> "${GITHUB_OUTPUT}"
 
           echo "Release tag: ${TAG}"
           echo "Packaging matrix:"
-          echo "${MATRIX}" | python3 -m json.tool
+          echo "${MATRICES}" | python3 -c 'import json,sys; print(json.dumps(json.load(sys.stdin)["packages"], indent=2))'
+          echo "Bundle matrix:"
+          echo "${MATRICES}" | python3 -c 'import json,sys; print(json.dumps(json.load(sys.stdin)["bundles"], indent=2))'
 
       - name: Verify the release exists
         shell: bash
@@ -159,7 +187,7 @@ jobs:
           echo "Release '${TAG}' found."
 
   package:
-    name: Package ${{ matrix.name }} (linux/${{ matrix.arch }})
+    name: Build ${{ matrix.name }} (linux/${{ matrix.arch }})
     needs: prepare
     runs-on: ubuntu-latest
     strategy:
@@ -240,7 +268,7 @@ jobs:
           sha256sum "${ASSET}" > "${ASSET}.sha256"
           ls -lh "${ASSET}" "${ASSET}.sha256"
 
-      - name: Upload archive to the GitHub Release
+      - name: Upload intermediate archive to the GitHub Release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -253,7 +281,9 @@ jobs:
 
           ASSET="skillhub-${NAME}-${VERSION}-linux-${ARCH}.tar.gz"
 
-          # Upload straight to the Release; retry transient API failures.
+          # Upload straight to the Release; retry transient API failures. The
+          # `bundle` job consumes these archives and removes them again, so they
+          # are internal transfer artefacts rather than the final deliverables.
           for attempt in 1 2 3 4 5; do
             if gh release upload "${TAG}" "${ASSET}" "${ASSET}.sha256" \
                  --repo "${GITHUB_REPOSITORY}" --clobber; then
@@ -267,12 +297,147 @@ jobs:
           echo "::error::Failed to upload ${ASSET} to release ${TAG}"
           exit 1
 
-  finalize:
-    name: Publish checksums and usage notes
+  bundle:
+    name: Bundle images (linux/${{ matrix.arch }})
     needs: [prepare, package]
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.prepare.outputs.bundle_matrix) }}
     steps:
-      - name: Download per-image checksums from the Release
+      - name: Download the per-image archives of linux/${{ matrix.arch }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+          ARCH: ${{ matrix.arch }}
+          COMPONENTS: ${{ join(matrix.components, ' ') }}
+        run: |
+          set -euo pipefail
+
+          mkdir -p downloads
+
+          for component in ${COMPONENTS}; do
+            asset="skillhub-${component}-${VERSION}-linux-${ARCH}.tar.gz"
+            for attempt in 1 2 3 4 5; do
+              if gh release download "${TAG}" \
+                   --repo "${GITHUB_REPOSITORY}" \
+                   --pattern "${asset}" --pattern "${asset}.sha256" \
+                   --dir downloads --clobber; then
+                break
+              fi
+              if [ "${attempt}" -eq 5 ]; then
+                echo "::error::Failed to download ${asset} from release ${TAG}"
+                exit 1
+              fi
+              echo "Download attempt ${attempt} for ${asset} failed; retrying in $((attempt * 15))s..."
+              sleep $((attempt * 15))
+            done
+
+            # Verify the transferred bytes before loading them into the daemon.
+            ( cd downloads && sha256sum -c "${asset}.sha256" )
+          done
+
+          ls -lh downloads
+
+      - name: Merge the images into one archive
+        shell: bash
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+          ARCH: ${{ matrix.arch }}
+          COMPONENTS: ${{ join(matrix.components, ' ') }}
+        run: |
+          set -euo pipefail
+
+          images=()
+          for component in ${COMPONENTS}; do
+            archive="downloads/skillhub-${component}-${VERSION}-linux-${ARCH}.tar.gz"
+            gzip -t "${archive}"
+
+            # Use the reference docker reports instead of rebuilding it, so the
+            # bundle always keeps the tags the `package` job produced.
+            loaded="$(docker load -i "${archive}" | sed -n 's/^Loaded image: //p' | head -n 1)"
+            if [ -z "${loaded}" ]; then
+              echo "::error::docker load reported no image for ${archive}"
+              exit 1
+            fi
+            echo "Loaded ${loaded}"
+            images+=("${loaded}")
+          done
+
+          for image in "${images[@]}"; do
+            docker image inspect "${image}" >/dev/null
+          done
+
+          BUNDLE="skillhub-images-${VERSION}-linux-${ARCH}.tar.gz"
+
+          # A single docker-archive holding every image of this architecture, so a
+          # single `docker load -i` restores all of them at once.
+          docker save "${images[@]}" | gzip -9 > "${BUNDLE}"
+
+          gzip -t "${BUNDLE}"
+          tar -tzf "${BUNDLE}" >/dev/null
+
+          sha256sum "${BUNDLE}" > "${BUNDLE}.sha256"
+          ls -lh "${BUNDLE}" "${BUNDLE}.sha256"
+
+      - name: Upload the bundle to the GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+
+          BUNDLE="skillhub-images-${VERSION}-linux-${ARCH}.tar.gz"
+
+          for attempt in 1 2 3 4 5; do
+            if gh release upload "${TAG}" "${BUNDLE}" "${BUNDLE}.sha256" \
+                 --repo "${GITHUB_REPOSITORY}" --clobber; then
+              echo "Uploaded ${BUNDLE}"
+              exit 0
+            fi
+            echo "Upload attempt ${attempt} failed; retrying in $((attempt * 15))s..."
+            sleep $((attempt * 15))
+          done
+
+          echo "::error::Failed to upload ${BUNDLE} to release ${TAG}"
+          exit 1
+
+      - name: Remove the per-image intermediates
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+          ARCH: ${{ matrix.arch }}
+          COMPONENTS: ${{ join(matrix.components, ' ') }}
+        run: |
+          set -euo pipefail
+
+          # The bundle above is the only artefact operators need; drop the
+          # intermediates so the Release offers one archive per architecture.
+          for component in ${COMPONENTS}; do
+            for suffix in "" ".sha256"; do
+              asset="skillhub-${component}-${VERSION}-linux-${ARCH}.tar.gz${suffix}"
+              if gh release delete-asset "${TAG}" "${asset}" \
+                   --repo "${GITHUB_REPOSITORY}" --yes; then
+                echo "Removed intermediate ${asset}"
+              else
+                echo "::warning::Could not remove intermediate ${asset}; delete it manually if it is stale."
+              fi
+            done
+          done
+
+  finalize:
+    name: Publish checksums and usage notes
+    needs: [prepare, bundle]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download bundle checksums from the Release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -280,9 +445,11 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
+          # Only the merged bundles are left at this point, so the aggregate
+          # covers exactly the archives operators download.
           gh release download "${TAG}" \
             --repo "${GITHUB_REPOSITORY}" \
-            --pattern '*.tar.gz.sha256' \
+            --pattern 'skillhub-images-*.tar.gz.sha256' \
             --dir dist \
             --clobber
           echo "Downloaded checksums:"
@@ -299,16 +466,22 @@ jobs:
           cat ./*.sha256 > "skillhub-images-${VERSION}-SHA256SUMS"
 
           cat > "skillhub-images-${VERSION}-HOW-TO-LOAD.md" <<EOF
-          # SkillHub Docker image archives ${VERSION}
+          # SkillHub Docker image bundles ${VERSION}
 
-          Every \`.tar.gz\` asset is produced with \`docker save\` and can be loaded
-          directly into a Docker daemon:
+          Every \`skillhub-images-${VERSION}-linux-<arch>.tar.gz\` asset is a single
+          \`docker save\` archive containing **all** SkillHub images for that
+          architecture, so one command restores them all:
 
           \`\`\`bash
-          docker load -i skillhub-server-${VERSION}-linux-amd64.tar.gz
-          docker load -i skillhub-web-${VERSION}-linux-amd64.tar.gz
-          docker load -i skillhub-scanner-${VERSION}-linux-amd64.tar.gz
+          docker load -i skillhub-images-${VERSION}-linux-amd64.tar.gz
+          docker images --filter 'reference=ghcr.io/*/skillhub-*'
           \`\`\`
+
+          Bundled images:
+
+          - \`linux/amd64\`: server, web, scanner
+          - \`linux/arm64\`: server, web, scanner
+          - \`linux/riscv64\`: server, web (the scanner is not built for riscv64)
 
           Loaded images keep the \`ghcr.io/<owner>/skillhub-*\` repository name so they
           match the image defaults in \`compose.release.yml\`.
