@@ -24,8 +24,8 @@ test.describe('Landing access methods (Real API)', () => {
     await expect(webMode).toHaveAttribute('aria-pressed', 'false')
 
     await expect(page.getByText('npx -y @astron-team/skillhub@0.1.12 --version', { exact: true })).toBeVisible()
-    await expect(page.getByText(/npx -y @astron-team\/skillhub@0\.1\.12 search weather/)).toBeVisible()
-    await expect(page.getByText(/npx -y @astron-team\/skillhub@0\.1\.12 install @global\/weather/)).toBeVisible()
+    await expect(page.getByText(/npx -y @astron-team\/skillhub@0\.1\.12 search ponytail/)).toBeVisible()
+    await expect(page.getByText(/npx -y @astron-team\/skillhub@0\.1\.12 install @global\/ponytail/)).toBeVisible()
     await expect(page.getByRole('link', { name: 'CLI docs' })).toHaveAttribute(
       'href',
       'https://github.com/iflytek/skillhub/tree/main/cli',
@@ -48,7 +48,7 @@ test.describe('Landing access methods (Real API)', () => {
     await discoveryTab.click()
     await expect(discoveryTab).toHaveAttribute('aria-selected', 'true')
     await expect(page.getByText('Search SkillHub Registry')).toBeVisible()
-    await expect(page.getByText('Match @global/weather · v1.3.0')).toBeVisible()
+    await expect(page.getByText('Match @global/ponytail · v1.0.0')).toBeVisible()
 
     const guideResponse = await page.request.get('/registry/skill.md')
     expect(guideResponse.status()).toBe(200)

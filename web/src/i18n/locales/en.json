@@ -158,7 +158,6 @@
       "marketplace": "Marketplace",
       "latest": "Latest",
       "demoSkills": {
-        "weather": "Query real-time weather for cities worldwide",
         "diagramDesign": "Design polished diagrams and illustrations",
         "archify": "Turn code or designs into architecture diagrams",
         "ponytail": "Solve problems with the least code; no over-engineering",
@@ -237,26 +236,26 @@
           "copyInstruction": "Copy instruction",
           "copyErrorDescription": "Select and copy the Registry setup instruction manually.",
           "steps": { "read": "Read the guide", "configure": "Configure Registry", "discover": "Discover skills on demand" },
-          "prompt": "What is the weather in Hefei today?",
+          "prompt": "Add a cache layer to our settings endpoint",
           "discovery": {
-            "intentTitle": "Identify the task", "intentDescription": "Real-time weather and travel advice are needed",
-            "searchTitle": "Search SkillHub Registry", "searchDescription": "Match @global/weather · v1.3.0",
+            "intentTitle": "Identify the task", "intentDescription": "The request risks over-engineering before the problem is proven",
+            "searchTitle": "Search SkillHub Registry", "searchDescription": "Match @global/ponytail · v1.0.0",
             "readTitle": "Read skill instructions", "readDescription": "Confirm the input and invocation contract"
           },
-          "answerLead": "Hefei is cloudy today, 26°C",
-          "answerTail": ", with possible brief showers this afternoon. Carrying rain gear is recommended."
+          "answerLead": "Hold off on the cache layer",
+          "answerTail": ": the endpoint already answers in 8 ms. Add it once the metrics say so."
         },
         "cli": {
           "copyErrorDescription": "Select and copy the CLI command manually.",
           "skillsFound": "Sample results:",
-          "forecastSummary": "Seven-day weather forecast",
-          "installed": "@global/weather installed to ./skills/global/weather",
+          "reviewSummary": "Code review that only hunts over-engineering",
+          "installed": "@global/ponytail installed to ./skills/global/ponytail",
           "connected": "connected",
           "docs": "CLI docs"
         },
         "web": {
           "marketplace": "Skill marketplace", "publicSkills": "Public skills", "search": "Search skills",
-          "status": "Public · Available", "summary": "Real-time weather, forecasts, and travel information",
+          "status": "Public · Available", "summary": "Keeps coding work minimal: least code, standard library first, no unnecessary dependencies",
           "download": "Download ZIP", "readTitle": "Read before using",
           "readDescription": "Review the purpose, inputs, and execution instructions in SKILL.md before downloading the complete package.",
           "version": "Version", "files": "Files", "format": "Format",

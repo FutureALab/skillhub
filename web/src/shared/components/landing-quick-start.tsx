@@ -189,10 +189,10 @@ function CliAccessPanel() {
           <div className="flex items-start gap-2">
             <span className="select-none font-bold text-emerald-600 dark:text-emerald-400">$</span>
             <div className="flex-1">
-              <span className="text-neutral-800 dark:text-neutral-200">npx -y @astron-team/skillhub@0.1.12 search weather \</span>
+              <span className="text-neutral-800 dark:text-neutral-200">npx -y @astron-team/skillhub@0.1.12 search ponytail \</span>
               <button
                 type="button"
-                onClick={() => handleCopy(`npx -y @astron-team/skillhub@0.1.12 search weather --registry ${registryUrl} --limit 5`, 1)}
+                onClick={() => handleCopy(`npx -y @astron-team/skillhub@0.1.12 search ponytail --registry ${registryUrl} --limit 5`, 1)}
                 className="ml-2 inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] text-muted-foreground align-middle transition-[color,background-color,transform] hover:bg-neutral-100 hover:text-foreground active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:hover:bg-neutral-800"
               >
                 {copiedIdx === 1 ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
@@ -211,14 +211,14 @@ function CliAccessPanel() {
           <div className="mt-1 space-y-0.5 pl-5">
             <div className="text-[11px] text-muted-foreground">{t('landing.experience.quickStart.cli.skillsFound')}</div>
             <div className="flex gap-4">
-              <span className="text-blue-600 dark:text-blue-400">@global/weather</span>
-              <span className="text-muted-foreground">v1.3.0</span>
-              <span className="text-neutral-600 dark:text-neutral-400">{t('landing.experience.demoSkills.weather')}</span>
+              <span className="text-blue-600 dark:text-blue-400">@global/ponytail</span>
+              <span className="text-muted-foreground">v1.0.0</span>
+              <span className="text-neutral-600 dark:text-neutral-400">{t('landing.experience.demoSkills.ponytail')}</span>
             </div>
             <div className="flex gap-4">
-              <span className="text-blue-600 dark:text-blue-400">@global/forecast</span>
-              <span className="text-muted-foreground">v2.1.0</span>
-              <span className="text-neutral-600 dark:text-neutral-400">{t('landing.experience.quickStart.cli.forecastSummary')}</span>
+              <span className="text-blue-600 dark:text-blue-400">@global/ponytail-review</span>
+              <span className="text-muted-foreground">v1.0.0</span>
+              <span className="text-neutral-600 dark:text-neutral-400">{t('landing.experience.quickStart.cli.reviewSummary')}</span>
             </div>
           </div>
         </div>
@@ -228,10 +228,10 @@ function CliAccessPanel() {
           <div className="flex items-start gap-2">
             <span className="select-none font-bold text-emerald-600 dark:text-emerald-400">$</span>
             <div className="flex-1">
-              <span className="text-neutral-800 dark:text-neutral-200">npx -y @astron-team/skillhub@0.1.12 install @global/weather \</span>
+              <span className="text-neutral-800 dark:text-neutral-200">npx -y @astron-team/skillhub@0.1.12 install @global/ponytail \</span>
               <button
                 type="button"
-                onClick={() => handleCopy(`npx -y @astron-team/skillhub@0.1.12 install @global/weather --dir ./skills --registry ${registryUrl}`, 2)}
+                onClick={() => handleCopy(`npx -y @astron-team/skillhub@0.1.12 install @global/ponytail --dir ./skills --registry ${registryUrl}`, 2)}
                 className="ml-2 inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] text-muted-foreground align-middle transition-[color,background-color,transform] hover:bg-neutral-100 hover:text-foreground active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:hover:bg-neutral-800"
               >
                 {copiedIdx === 2 ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
@@ -295,12 +295,12 @@ function WebAccessPanel() {
             {t('landing.experience.quickStart.web.search')}
           </div>
           {[
-            ['W', 'weather', '@global'],
+            ['P', 'ponytail', '@global'],
             ['G', 'git-helper', '@devtools'],
             ['D', 'diagram-maker', '@global'],
           ].map(([letter, name, namespace], index) => (
             <div key={name} className={`flex items-center gap-2.5 border-b border-border/50 py-3 ${index === 0 ? 'text-foreground' : 'text-muted-foreground'}`}>
-              <span className={`flex h-7 w-7 items-center justify-center rounded-md text-[10px] font-bold ${index === 0 ? 'bg-indigo-50 text-indigo-600 dark:bg-indigo-500/10 dark:text-indigo-300' : 'bg-secondary'}`}>{letter}</span>
+              <span className={`flex h-7 w-7 items-center justify-center rounded-md text-[10px] font-bold ${index === 0 ? 'bg-amber-50 text-amber-600 dark:bg-amber-500/10 dark:text-amber-300' : 'bg-secondary'}`}>{letter}</span>
               <span className="min-w-0">
                 <strong className="block truncate text-[11px] font-semibold">{name}</strong>
                 <span className="font-mono text-[9px]">{namespace}</span>
@@ -315,10 +315,10 @@ function WebAccessPanel() {
               <span className="inline-flex items-center gap-1.5 text-[10px] font-medium text-emerald-700 dark:text-emerald-400">
                 <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />{t('landing.experience.quickStart.web.status')}
               </span>
-              <h3 className="mt-2 text-xl font-semibold tracking-tight text-foreground">weather <span className="font-mono text-xs font-normal text-muted-foreground">@global</span></h3>
+              <h3 className="mt-2 text-xl font-semibold tracking-tight text-foreground">ponytail <span className="font-mono text-xs font-normal text-muted-foreground">@global</span></h3>
               <p className="mt-1 text-xs text-muted-foreground">{t('landing.experience.quickStart.web.summary')}</p>
             </div>
-            <a href={buildApiUrl(`${WEB_API_PREFIX}/skills/global/weather/download`)} className="inline-flex w-fit items-center gap-2 rounded-lg bg-foreground px-4 py-2.5 text-xs font-semibold text-background shadow-sm transition-[transform,opacity,box-shadow] duration-150 hover:-translate-y-px hover:opacity-90 hover:shadow-md active:translate-y-0 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 motion-reduce:transform-none">
+            <a href={buildApiUrl(`${WEB_API_PREFIX}/skills/global/ponytail/download`)} className="inline-flex w-fit items-center gap-2 rounded-lg bg-foreground px-4 py-2.5 text-xs font-semibold text-background shadow-sm transition-[transform,opacity,box-shadow] duration-150 hover:-translate-y-px hover:opacity-90 hover:shadow-md active:translate-y-0 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 motion-reduce:transform-none">
               <Download className="h-3.5 w-3.5" />{t('landing.experience.quickStart.web.download')}
             </a>
           </div>
@@ -334,7 +334,7 @@ function WebAccessPanel() {
               </p>
             </div>
             <dl className="space-y-3 text-[10px]">
-              <div className="flex justify-between border-b border-border/60 pb-2"><dt className="text-muted-foreground">{t('landing.experience.quickStart.web.version')}</dt><dd className="font-mono text-foreground">v1.3.0</dd></div>
+              <div className="flex justify-between border-b border-border/60 pb-2"><dt className="text-muted-foreground">{t('landing.experience.quickStart.web.version')}</dt><dd className="font-mono text-foreground">v1.0.0</dd></div>
               <div className="flex justify-between border-b border-border/60 pb-2"><dt className="text-muted-foreground">{t('landing.experience.quickStart.web.files')}</dt><dd className="text-foreground">3</dd></div>
               <div className="flex justify-between"><dt className="text-muted-foreground">{t('landing.experience.quickStart.web.format')}</dt><dd className="text-foreground">ZIP</dd></div>
             </dl>

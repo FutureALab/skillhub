@@ -158,7 +158,6 @@
       "marketplace": "技能市场",
       "latest": "最新发布",
       "demoSkills": {
-        "weather": "查询全球城市实时天气",
         "diagramDesign": "设计与绘制高质量图表和示意图",
         "archify": "从代码或描述生成系统架构图",
         "ponytail": "用最简方案解决问题，拒绝过度设计",
@@ -237,26 +236,26 @@
           "copyInstruction": "复制指令",
           "copyErrorDescription": "请手动选择并复制这条 Registry 配置指令。",
           "steps": { "read": "读取文档", "configure": "配置 Registry", "discover": "按需发现技能" },
-          "prompt": "帮我查下合肥今天的天气",
+          "prompt": "帮我给设置接口加一层缓存",
           "discovery": {
-            "intentTitle": "识别任务意图", "intentDescription": "需要实时天气与出行建议",
-            "searchTitle": "检索 SkillHub Registry", "searchDescription": "匹配 @global/weather · v1.3.0",
+            "intentTitle": "识别任务意图", "intentDescription": "需求有过度设计风险，先确认问题是否真实存在",
+            "searchTitle": "检索 SkillHub Registry", "searchDescription": "匹配 @global/ponytail · v1.0.0",
             "readTitle": "读取技能说明", "readDescription": "确认输入格式和调用方式"
           },
-          "answerLead": "合肥今天多云，26°C",
-          "answerTail": "，下午可能有短时阵雨，外出建议携带雨具。"
+          "answerLead": "先不加缓存",
+          "answerTail": "：这个接口响应只要 8 毫秒，等监控数据真正报警了再说。"
         },
         "cli": {
           "copyErrorDescription": "请手动选择并复制这条 CLI 命令。",
           "skillsFound": "示例结果：",
-          "forecastSummary": "7 天天气预报",
-          "installed": "@global/weather 已安装到 ./skills/global/weather",
+          "reviewSummary": "只针对过度设计的代码评审",
+          "installed": "@global/ponytail 已安装到 ./skills/global/ponytail",
           "connected": "已连接",
           "docs": "CLI 文档"
         },
         "web": {
           "marketplace": "技能市场", "publicSkills": "公开技能", "search": "搜索技能",
-          "status": "公开 · 可用", "summary": "查询实时天气、未来预报和出行信息",
+          "status": "公开 · 可用", "summary": "让编码任务保持最小实现：最少代码、优先标准库、不引入多余依赖",
           "download": "下载 ZIP", "readTitle": "先阅读，再使用",
           "readDescription": "阅读 SKILL.md 中的用途、输入要求和执行方式，确认适合当前任务后再获取完整技能包。",
           "version": "版本", "files": "文件", "format": "格式",

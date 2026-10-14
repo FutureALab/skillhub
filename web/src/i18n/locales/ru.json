@@ -158,7 +158,6 @@
       "marketplace": "Каталог",
       "latest": "Новинки",
       "demoSkills": {
-        "weather": "Погода в городах мира в реальном времени",
         "diagramDesign": "Дизайн и отрисовка схем и иллюстраций",
         "archify": "Архитектурные диаграммы из кода или описания",
         "ponytail": "Минимум кода и никакого оверинжиниринга",
@@ -237,26 +236,26 @@
           "copyInstruction": "Копировать инструкцию",
           "copyErrorDescription": "Выделите и скопируйте инструкцию настройки Registry вручную.",
           "steps": { "read": "Прочитать руководство", "configure": "Настроить Registry", "discover": "Находить скиллы по запросу" },
-          "prompt": "Какая сегодня погода в Хэфэе?",
+          "prompt": "Добавь кэш для эндпоинта настроек",
           "discovery": {
-            "intentTitle": "Определить задачу", "intentDescription": "Нужны погода и совет для поездки",
-            "searchTitle": "Поиск в SkillHub Registry", "searchDescription": "Найден @global/weather · v1.3.0",
+            "intentTitle": "Определить задачу", "intentDescription": "Запрос рискует усложнить код до того, как проблема подтверждена",
+            "searchTitle": "Поиск в SkillHub Registry", "searchDescription": "Найден @global/ponytail · v1.0.0",
             "readTitle": "Прочитать инструкции", "readDescription": "Проверить входные данные и способ вызова"
           },
-          "answerLead": "Сегодня в Хэфэе облачно, 26°C",
-          "answerTail": ", днём возможен кратковременный дождь. Рекомендуется взять зонт."
+          "answerLead": "Кэш пока не нужен",
+          "answerTail": ": эндпоинт отвечает за 8 мс. Добавим, когда метрики это подтвердят."
         },
         "cli": {
           "copyErrorDescription": "Выделите и скопируйте команду CLI вручную.",
           "skillsFound": "Пример результатов:",
-          "forecastSummary": "Прогноз погоды на семь дней",
-          "installed": "@global/weather установлен в ./skills/global/weather",
+          "reviewSummary": "Ревью, которое ищет только оверинжиниринг",
+          "installed": "@global/ponytail установлен в ./skills/global/ponytail",
           "connected": "подключено",
           "docs": "Документация CLI"
         },
         "web": {
           "marketplace": "Каталог скиллов", "publicSkills": "Публичные скиллы", "search": "Поиск скиллов",
-          "status": "Публичный · Доступен", "summary": "Погода, прогнозы и рекомендации для поездок",
+          "status": "Публичный · Доступен", "summary": "Держит код минимальным: меньше строк, стандартная библиотека вместо зависимостей, без оверинжиниринга",
           "download": "Скачать ZIP", "readTitle": "Сначала прочитайте",
           "readDescription": "Изучите назначение, входные данные и способ выполнения в SKILL.md перед загрузкой полного пакета.",
           "version": "Версия", "files": "Файлы", "format": "Формат",
